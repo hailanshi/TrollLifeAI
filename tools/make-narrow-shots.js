@@ -1,4 +1,4 @@
-/**
+﻿/**
  * make-narrow-shots.js —— 在 390px 宽的 iframe 里真实渲染 app.html
  * 用途：① 报告真实 iPhone 宽度下有没有横向溢出；② 截图真机尺寸下的各个界面。
  * 用法： node tools/make-narrow-shots.js   然后 powershell -File tools/shot.ps1
@@ -60,8 +60,21 @@ const SCENES = {
     TL.addPet('猫');
     for (var i = 0; i < 5; i++) { TL.addLog('第 ' + (22 + i) + ' 年：示例人生记录'); }
     window.ui.go('home');`,
-  narrow_relations: `
+  /* 模拟带刘海机型：给顶栏注入 48px 安全区，验证内容区留白会跟着变高（不再被顶栏盖住） */
+  narrow_notch: `
+    var st = d.createElement('style');
+    st.textContent = '#topbar{padding-top:48px}';
+    d.head.appendChild(st);
     TL.resetAll();
+    window.ui.tab = 'start'; window.ui.setEra('00'); window.ui.setCity('一线城市');
+    window.ui.drawTalents(); window.ui.pickTalent(0); window.ui.beginLife();
+    window.ui.go('ai');
+    window.ui.syncLayout();
+    var tb = d.getElementById('topbar'), sc = d.getElementById('screen');
+    window.__notchReport = 'TOPBAR=' + Math.round(tb.getBoundingClientRect().height) +
+      ' PADTOP=' + sc.style.paddingTop + ' PADBOTTOM=' + sc.style.paddingBottom;`,
+
+  narrow_relations: `
     window.ui.tab = 'start'; window.ui.setEra('90'); window.ui.setCity('一线城市');
     window.ui.drawTalents(); window.ui.pickTalent(0); window.ui.beginLife();
     TL.S.age = 32;
@@ -144,7 +157,8 @@ function tryRun() {
           out.push(all[i].tagName + '.' + String(all[i].className || '-').slice(0, 22) + '[right=' + Math.round(r.right) + ']');
         }
       }
-      outerDoc.body.setAttribute('data-narrow', 'COUNT=' + out.length + ' :: ' + out.slice(0, 12).join(' || '));
+      outerDoc.body.setAttribute('data-narrow', 'COUNT=' + out.length + ' :: ' + out.slice(0, 12).join(' || ') +
+        ' :: ' + (w.__notchReport || 'no-layout-report'));
     } catch (e2) { outerDoc.body.setAttribute('data-narrow', 'ERR2 ' + e2.message); }
   }, 300);
 }

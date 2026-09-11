@@ -99,7 +99,24 @@
   function navVisible(v) {
     $('nav').className = v ? 'safe-bottom' : 'hide';
     $('screen').className = v ? '' : 'noNav';
+    syncLayout();
   }
+
+  /* 用实测高度修正内容区上下留白：
+     顶栏高度 = 刘海安全区 + 44pt；底部导航高度同理。
+     不做这一步，iPhone 上每页第一行文字会被顶栏盖住。 */
+  function syncLayout() {
+    try {
+      var topbar = $('topbar'), nav = $('nav'), screen = $('screen');
+      if (!topbar || !screen) { return; }
+      var topH = topbar.offsetHeight || 44;
+      var navH = 0;
+      if (nav && nav.className.indexOf('hide') === -1) { navH = nav.offsetHeight || 48; }
+      screen.style.paddingTop = (topH + 10) + 'px';
+      screen.style.paddingBottom = navH > 0 ? (navH + 12) + 'px' : '16px';
+    } catch (e) { }
+  }
+  ui.syncLayout = syncLayout;
   function setTop(age, era) {
     $('chipAge').innerHTML = age === null ? '年龄 --' : ('年龄 ' + age + ' 岁');
     $('chipEra').innerHTML = era ? ('年代 ' + TL.ERA_NAME[era]) : '年代 --';
@@ -107,6 +124,7 @@
 
   function render() {
     var S = TL.S;
+    syncLayout();
     if (ui.tab !== 'start' && (!S || !S.alive)) {
       if (S && !S.alive && ui.tab !== 're') { ui.tab = 're'; }
     }
@@ -1119,6 +1137,10 @@
         ui.tab = 'start';
       }
       render();
+      syncLayout();
+      /* 旋转 / 窗口变化后重新测量（竖屏为主，但桌面浏览器拖窗口也要正确） */
+      window.addEventListener('resize', function () { syncLayout(); });
+      window.addEventListener('orientationchange', function () { setTimeout(syncLayout, 300); });
       if (saved && !saved.alive) { showDeath(); }
     } catch (e) {
       ui.tab = 'start';

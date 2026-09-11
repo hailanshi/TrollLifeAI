@@ -1,4 +1,4 @@
-# shot.ps1 -- render the demo pages with headless Edge and save screenshots
+﻿# shot.ps1 -- render the demo pages with headless Edge and save screenshots
 # Usage: powershell -ExecutionPolicy Bypass -File tools/shot.ps1
 $ErrorActionPreference = 'Continue'
 
@@ -14,7 +14,7 @@ $edge = @(
 if (-not $edge) { Write-Host "Edge not found, skip screenshots"; exit 0 }
 
 $names = @(
-    'narrow_start', 'narrow_home', 'narrow_actions', 'narrow_relations', 'narrow_event',
+    'narrow_start', 'narrow_home', 'narrow_actions', 'narrow_notch', 'narrow_relations', 'narrow_event',
     'narrow_ach', 'narrow_skill', 'narrow_god', 'narrow_ai', 'narrow_death'
 )
 foreach ($n in $names) {

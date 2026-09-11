@@ -57,6 +57,11 @@
     for (var k in patch) {
       if (Object.prototype.hasOwnProperty.call(patch, k)) { c[k] = patch[k]; }
     }
+    /* 写入时也做一次范围归一化，避免界面显示值与实际生效值不一致 */
+    c.chance = TL.clamp(Number(c.chance) || 0, 0, 1);
+    c.maxPerLife = TL.clamp(parseInt(c.maxPerLife, 10) || 30, 0, 500);
+    c.timeout = TL.clamp(parseInt(c.timeout, 10) || 45000, 3000, 120000);
+    c.startAge = TL.clamp(parseInt(c.startAge, 10) || 0, 0, 100);
     TL.ai.config = c;
     try { localStorage.setItem(TL.AI_KEY, JSON.stringify(c)); } catch (e) { }
     return c;

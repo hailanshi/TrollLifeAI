@@ -21,7 +21,7 @@ input,select,textarea,button{font-family:inherit;font-size:16px}
 
 /* ===== 顶部标题栏 ===== */
 #topbar{position:fixed;top:0;left:0;right:0;z-index:20;background:#12151b;
-  border-bottom:1px solid #232833}
+  border-bottom:1px solid #232833;box-sizing:border-box}
 #topbarInner{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;min-height:44px}
 #appTitle{font-size:16px;font-weight:600;letter-spacing:.5px;color:#e6edf3}
 #appTitle small{display:block;font-size:11px;color:#6b7684;font-weight:400;letter-spacing:0}
@@ -30,9 +30,13 @@ input,select,textarea,button{font-family:inherit;font-size:16px}
   border-radius:999px;padding:3px 9px;white-space:nowrap}
 
 /* ===== 内容区 ===== */
+/* 顶部/底部内边距必须把「顶栏实际高度（含刘海安全区）」和「底部导航高度」算进去，
+   否则内容会钻到顶栏下面被盖住。CSS 先给一个含 env() 的保守值，
+   页面加载后再由 JS 用实测高度精确覆盖（见 syncLayout）。*/
 #screen{position:fixed;top:0;left:0;right:0;bottom:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
-  padding:56px 12px 78px 12px}
-#screen.noNav{padding-bottom:24px}
+  padding:calc(60px + env(safe-area-inset-top)) 12px calc(84px + env(safe-area-inset-bottom)) 12px;
+  box-sizing:border-box}
+#screen.noNav{padding-bottom:calc(16px + env(safe-area-inset-bottom))}
 .section{margin:0 0 12px 0}
 .card{background:#14171d;border:1px solid #232833;border-radius:12px;padding:12px;margin-bottom:10px}
 .card h3{margin:0 0 8px 0;font-size:14px;color:#9fb0c0;font-weight:600;letter-spacing:.5px}

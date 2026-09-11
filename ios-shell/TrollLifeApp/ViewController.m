@@ -17,7 +17,6 @@
 
 @interface ViewController ()
 @property (nonatomic, assign) BOOL didLoadPage;
-@property (nonatomic, strong) UIButton *diagButton;
 @property (nonatomic, weak) TLDiagnosticViewController *diagVC;
 @property (nonatomic, assign) NSInteger testLevel;   /* 0=正常启动 1/2/3=分级测试 */
 @property (nonatomic, assign) BOOL webViewCreatedInTest;
@@ -47,11 +46,6 @@
         TLMarkStage(@"WKWebView 创建异常，转入诊断页");
         [self installDiagnosticScreenAsRoot];
     }
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    TLMarkStage(@"ViewController 已显示");
 }
 
 - (void)dealloc {
@@ -119,36 +113,30 @@
     [self.view insertSubview:self.webView atIndex:0];
     TLMarkStage([NSString stringWithFormat:@"%@：WKWebView 已加入视图层级", tag]);
 
-    [self installDiagButton];
     return YES;
 }
 
-/* 右上角常驻「诊断」小按钮：页面白屏/异常时也能随时看到日志 */
-- (void)installDiagButton {
-    @try {
-        if (self.diagButton) { [self.diagButton removeFromSuperview]; self.diagButton = nil; }
-        self.diagButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        [self.diagButton setTitle:@"诊断" forState:UIControlStateNormal];
-        self.diagButton.titleLabel.font = [UIFont systemFontOfSize:11];
-        [self.diagButton setTitleColor:[UIColor colorWithWhite:0.75 alpha:0.9] forState:UIControlStateNormal];
-        self.diagButton.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.55];
-        self.diagButton.layer.cornerRadius = 10;
-        self.diagButton.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.diagButton addTarget:self action:@selector(showDiagnostics) forControlEvents:UIControlEventTouchUpInside];
-        [self.view addSubview:self.diagButton];
+/* 诊断入口做成「不可见」的：摇一摇手机打开诊断页。
+   不在界面上常驻任何按钮，避免遮挡页面内容。 */
+- (BOOL)canBecomeFirstResponder { return YES; }
 
-        UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
-        [NSLayoutConstraint activateConstraints:@[
-            [self.diagButton.widthAnchor constraintEqualToConstant:46],
-            [self.diagButton.heightAnchor constraintEqualToConstant:22],
-            [self.diagButton.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-6],
-            [self.diagButton.topAnchor constraintEqualToAnchor:safe.topAnchor constant:2]
-        ]];
-    } @catch (NSException *e) {
-        TLLog(@"‼️ 创建诊断按钮失败（不致命）: %@", e.reason);
-    }
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    TLMarkStage(@"ViewController 已显示");
+    [self becomeFirstResponder];
 }
 
+- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event {
+    if (motion == UIEventSubtypeMotionShake) {
+        TLMarkStage(@"摇一摇：打开诊断页");
+        [self showDiagnostics];
+        return;
+    }
+    [super motionEnded:motion withEvent:event];
+}
+
+/* 诊断入口：只保留「摇一摇」，界面上不再常驻任何按钮（避免遮挡页面内容）。
+   另外连续启动失败会自动进入安全模式，那时也会直接显示诊断页。 */
 - (void)showDiagnostics {
     @try {
         TLDiagnosticViewController *vc = [TLDiagnosticViewController make];
@@ -256,7 +244,6 @@
         }
         self.testLevel = 0;
         [self.view bringSubviewToFront:self.webView];
-        [self.view bringSubviewToFront:self.diagButton];
     } @catch (NSException *e) {
         TLLog(@"退出诊断界面失败: %@", e.reason);
     }

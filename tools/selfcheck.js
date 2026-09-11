@@ -70,6 +70,13 @@ check('html,body touch-action:manipulation', /touch-action:manipulation/.test(st
 check('输入框字号 16px（防 iOS 自动放大）', /input[^{]*\{[^}]*font-size:16px/.test(styleBlock));
 check('弹窗长列表：头部/内容/按钮三段式', /modalHead/.test(styleBlock) && /modalBody[^{]*\{[^}]*overflow-y:auto/.test(styleBlock) && /modalFoot/.test(styleBlock));
 
+/* 内容区留白：必须把刘海安全区与顶栏高度算进去，否则每页首行会被顶栏盖住 */
+check('内容区顶部留白含安全区（calc + env）',
+  /#screen\{[^}]*padding:calc\([^)]*env\(safe-area-inset-top\)\)/.test(styleBlock.replace(/\n/g, '')));
+check('JS 用实测高度修正内容区留白（syncLayout）',
+  /function syncLayout/.test(inlineJs) && /screen\.style\.paddingTop/.test(inlineJs) &&
+  /offsetHeight/.test(inlineJs) && /syncLayout\(\)/.test(inlineJs));
+
 /* 4. 老语法 JS（先剥掉字符串与正则字面量，避免把 /```json/ 误判成模板字符串） */
 const jsBare = inlineJs
   .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
@@ -90,8 +97,8 @@ check('未使用 let / const（老语法）', !letConst);
 
 /* 5. 无动态 DOM 事件绑定 */
 check('无 el.onclick = 动态绑定', !/\.onclick\s*=/.test(inlineJs));
-check('无 addEventListener 绑业务按钮（仅 DOMContentLoaded）',
-  (inlineJs.match(/addEventListener/g) || []).length <= 2);
+check('addEventListener 仅用于 DOMContentLoaded 与布局监听',
+  (inlineJs.match(/addEventListener/g) || []).length <= 5);
 
 /* 6. 无外部依赖 */
 check('无外部 script src', !/<script[^>]+src=/i.test(app));
@@ -235,6 +242,9 @@ check('index.html 候选路径逐条判空后再加入数组',
 check('分级测试阶梯（① 建 WebView ② 最小页 ③ 正式页）',
   /runTestLevel/.test(vc) && /分级测试第 %ld 级/.test(vc) && /finishTestSuccess/.test(vc) &&
   /showTestLadder = YES/.test(vc));
+check('界面上无常驻诊断按钮（改为摇一摇触发）',
+  !/installDiagButton/.test(vc) && !/@\"诊断\" forState/.test(vc) &&
+  /motionEnded/.test(vc) && /UIEventSubtypeMotionShake/.test(vc));
 
 /* 11. 工作流避坑点 */
 const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/build-ipa.yml'), 'utf8');
