@@ -1,5 +1,9 @@
 # TrollLifeAI · 人生重开模拟器
 
+> **仓库**：https://github.com/hailanshi/TrollLifeAI ・ **云端编译**：https://github.com/hailanshi/TrollLifeAI/actions
+> **已产物**：`TrollLifeAI.ipa`（arm64 / iOS 12+ / ad-hoc 签名 / UIDeviceFamily=[1] / 约 221 KB）——
+> 在 Actions 最近一次成功的运行页面底部 **Artifacts → TrollLifeAI-ipa** 即可下载，TrollStore 直接安装。
+
 单机文字人生模拟器：抽天赋 → 选出生年代与城市 → 逐年经历人生事件 → 管理 11 项属性 → 解锁成就 → 死亡后轮回转世。
 内置金手指密码 **208526**。全部数据本地持久化（localStorage / 本地文件），**不需要任何后端**。
 
