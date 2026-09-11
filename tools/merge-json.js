@@ -193,6 +193,41 @@ const normEvents = patches.event.map((e, i) => {
   return { age_range: e.age_range, title: e.title, story: e.story, choices: choices };
 });
 
+/* ---------------- 4.6 新增事件的年龄纠偏（用共用规则表；原始 35 条一个字都不改） ---------------- */
+const AGE_RULES = (() => {
+  try {
+    return readJson(path.join(ROOT, 'src', 'age-rules.json')).ageRules || [];
+  } catch (e) { return []; }
+})();
+const ageAdjusted = [];
+function eventFullText(ev) {
+  let t = (ev.title || '') + ' ' + (ev.story || '');
+  (ev.choices || []).forEach((c) => { t += ' ' + (c.option_text || '') + ' ' + (c.desc || ''); });
+  return t;
+}
+function effectiveRange(ev) {
+  const a = ev.age_range[0], b = ev.age_range[1];
+  let lo = a, hi = b;
+  const text = eventFullText(ev);
+  AGE_RULES.forEach((r) => {
+    if (!r.kw || !new RegExp(r.kw).test(text)) { return; }
+    if (typeof r.min === 'number' && r.min > lo) { lo = r.min; }
+    if (typeof r.max === 'number' && r.max < hi) { hi = r.max; }
+  });
+  if (lo > hi) { return [a, b]; }   /* 规则冲突 → 保留原区间 */
+  return [lo, hi];
+}
+normEvents.forEach((e) => {
+  const r = effectiveRange(e);
+  if (r[0] !== e.age_range[0] || r[1] !== e.age_range[1]) {
+    ageAdjusted.push({ title: e.title, from: e.age_range.slice(0), to: r.slice(0) });
+    e.age_range = r;
+  }
+});
+if (ageAdjusted.length) {
+  report.ageAdjusted = ageAdjusted;
+}
+
 /* ---------------- 5. 重复检查 ---------------- */
 function dupCheck(list, keyFn, label) {
   const seen = {};
@@ -258,6 +293,12 @@ Object.keys(report.files).forEach((k) => {
   console.log(`${k}.json  原始 ${f.original} 条 -> 合并后 ${f.merged === undefined ? '(未写出)' : f.merged} 条  (+${f.added === undefined ? '?' : f.added})`);
 });
 console.log('事件年龄分布:', JSON.stringify(report.eventAgeBuckets));
+if (ageAdjusted.length) {
+  console.log('\n按规则纠偏年龄的新增事件（' + ageAdjusted.length + ' 条）：');
+  ageAdjusted.forEach((a) => {
+    console.log('  ' + a.from.join('-') + ' -> ' + a.to.join('-') + '   ' + a.title);
+  });
+}
 console.log('标记统计:', JSON.stringify(markerCount));
 console.log('错误:', report.errors.length, '  警告:', report.warnings.length);
 report.errors.slice(0, 40).forEach((e) => console.log('  [ERR] ' + e));

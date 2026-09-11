@@ -1,4 +1,4 @@
-# TrollLifeAI · 人生重开模拟器
+﻿# TrollLifeAI · 人生重开模拟器
 
 > **仓库**：https://github.com/hailanshi/TrollLifeAI ・ **云端编译**：https://github.com/hailanshi/TrollLifeAI/actions
 > **已产物**：`TrollLifeAI.ipa`（arm64 / iOS 12+ / ad-hoc 签名 / UIDeviceFamily=[1] / 约 221 KB）——
@@ -159,7 +159,7 @@ powershell -ExecutionPolicy Bypass -File tools/make-icons.ps1    # 9. 重新生�
 | 5 份 JSON 严格校验（`JSON.parse` + 结构 + 11 项属性齐全 + 标题去重 + 标记合法） | ✅ 0 错误 0 警告 |
 | 原始内容未被修改（深比较 + 快照比对） | ✅ 5/5 通过 |
 | 单文件 HTML 内联 JS 语法（`new Function` + `node --check`） | ✅ 通过 |
-| 交付自检 61 项（iOS 铁律 / onclick 全局挂载 / 无外部依赖 / 壳无业务 / CI 避坑点 / 标记剥离 / 无嵌入 Key） | ✅ 61/61 |
+| 交付自检 80 项（iOS 铁律 / onclick 全局挂载 / 无外部依赖 / 壳无业务 / CI 避坑点 / 标记剥离 / 无嵌入 Key / 剧情逻辑规则） | ✅ 80/80 |
 | 引擎逻辑无头模拟（400 局人生、11 项属性完整性、成就解锁、金手指、死亡与轮回） | ✅ 全部通过 |
 | 玩法增强层自检（14 种行动全部无 NaN、关系互动频次限制、评分、3 槽位存档往返、非法存档拦截） | ✅ 7/7 项 |
 | AI 链路自检（配置持久化、结构校验、越界夹取、不合格丢弃、带代码块 JSON 抽取、请求头、成功替换、失败回退本地池） | ✅ 通过 |

@@ -44,6 +44,8 @@ const data = {
   event: JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/json/event.json'), 'utf8')),
 };
 global.__TL_DATA__ = data;
+/* 规则表在 app.html 里是内联的（window.__TL_RULES__），测试里手动喂进去 */
+global.__TL_RULES__ = JSON.parse(fs.readFileSync(path.join(ROOT, 'src/age-rules.json'), 'utf8'));
 
 const core = fs.readFileSync(path.join(ROOT, 'src/js/01_core.js'), 'utf8');
 const ach = fs.readFileSync(path.join(ROOT, 'src/js/02_ach.js'), 'utf8');
@@ -441,6 +443,86 @@ section('AI 失败回退（网络错误 → 自动改用本地 155 条剧情池�
 
 /* 关掉 AI，避免影响后续统计 */
 TL.ai.setConfig({ enabled: false, key: '', chance: 0.35 });
+
+/* 7.7 剧情逻辑：年龄纠偏（防止 7 岁早恋、9 岁高考） */
+TL.resetAll();
+const examEv = data.event.filter((e) => /高考|中考/.test(e.title + e.story))[0];
+const romanceEv = data.event.filter((e) => /早恋|情书/.test(e.title + e.story))[0];
+assert(examEv && romanceEv, '找不到升学/恋爱类事件');
+const examRange = TL.effectiveAgeRange(examEv);
+const romanceRange = TL.effectiveAgeRange(romanceEv);
+assert(examRange[0] >= 14, '升学考试事件年龄下限仍过低: ' + examRange.join('-'));
+assert(romanceRange[0] >= 12, '恋爱事件年龄下限仍过低: ' + romanceRange.join('-'));
+/* 7 岁那年，池子里绝不能出现早恋/高考 */
+TL.S = TL.newState('90', '小县城', [data.talents[0]]);
+TL.S.age = 7;
+const pool7 = data.event.filter((e) => TL.eventMatch(e, 7, '90'));
+assert(pool7.length > 3, '7 岁事件池过小: ' + pool7.length);
+assert(pool7.every((e) => !/早恋|高考/.test(e.title)), '7 岁事件池里仍有早恋/高考');
+for (let i = 0; i < 300; i++) {
+  const ev = TL.randomEvent();
+  if (ev && /早恋|高考/.test(ev.title)) { console.error('7 岁抽到了：' + ev.title); process.exit(1); }
+}
+/* 17 岁应当能抽到升学类事件 */
+const pool17 = data.event.filter((e) => TL.eventMatch(e, 17, '90'));
+assert(pool17.some((e) => /高考|中考/.test(e.title)), '17 岁反而抽不到升学类事件');
+section('年龄纠偏（' + examEv.title.slice(0, 12) + ' → ' + examRange.join('-') + '，恋爱类 → ' + romanceRange.join('-') + '）');
+
+/* 7.8 剧情前提校验（没配偶不离婚、没宠物不办宠物后事、没工作不谈升职） */
+TL.S = TL.newState('90', '小县城', [data.talents[0]]);
+TL.S.age = 35;
+TL.S.job = ''; TL.S.salary = 0;
+const divorceEv = data.event.filter((e) => /离婚|冷战/.test(e.title + e.story))[0];
+const petEv = data.event.filter((e) => /宠物|毛孩子/.test(e.title) && /生病|走失|离世|老了|最后/.test(e.title + e.story))[0];
+const jobEv = data.event.filter((e) => /同事|升职|加薪|被裁/.test(e.title + e.story))[0];
+assert(divorceEv && petEv && jobEv, '找不到用于测试前提的事件');
+assert(TL.preconditionReason(divorceEv, TL.S) !== '', '没有伴侣时离婚事件未被拦截');
+assert(TL.preconditionReason(petEv, TL.S) !== '', '没有宠物时宠物事件未被拦截');
+assert(TL.preconditionReason(jobEv, TL.S) !== '', '没有工作时职场事件未被拦截');
+TL.addRelation('spouse', '小雨');
+assert(TL.preconditionReason(divorceEv, TL.S) === '', '有伴侣后离婚事件仍被拦截');
+TL.addPet('猫');
+assert(TL.preconditionReason(petEv, TL.S) === '', '有宠物后宠物事件仍被拦截');
+TL.S.job = '程序员'; TL.S.salary = 20000;
+assert(TL.preconditionReason(jobEv, TL.S) === '', '有工作后职场事件仍被拦截');
+/* 兜底：极端年龄也不能抽不出事件（不能卡住） */
+for (const age of [0, 3, 40, 90, 105]) {
+  TL.S.age = age;
+  const ev = TL.randomEvent();
+  assert(ev && ev.title, age + ' 岁抽不到任何事件（会卡住）');
+}
+section('剧情前提校验（伴侣 / 子女 / 宠物 / 案底 / 工作 + 空池兜底）');
+
+/* 确认弹窗必须能真正执行带命名空间的动作（历史 bug：window['ui.doGiveUp'] 取不到 → 转世失效） */
+TL.S = TL.newState('90', '小县城', [data.talents[0]]);
+TL.S.age = 30;
+ui.tab = 're';
+ui.askGiveUp();
+assert(window.__confirm && window.__confirm.fn === 'ui.doGiveUp', '确认弹窗未记录动作名');
+window.doConfirmOK();
+assert(TL.S.alive === false, '确认「放弃本世」后没有生效（动作丢失 bug 回归）');
+assert(ui.tab === 're', '放弃本世后未回到轮回页');
+
+/* 金手指的确认弹窗同样要能执行 */
+TL.S = TL.newState('90', '小县城', [data.talents[0]]);
+TL.S.age = 40;
+ui.askGodKill();
+window.doConfirmOK();
+assert(TL.S.alive === false, '确认「结束本世」后没有生效');
+
+/* 解锁全部成就的确认弹窗 */
+TL.S = TL.newState('90', '小县城', [data.talents[0]]);
+const achBefore = TL.achStats().got;
+ui.askGodUnlockAll();
+window.doConfirmOK();
+assert(TL.achStats().got > achBefore, '确认「解锁全部成就」后没有生效');
+assert(TL.achStats().got === TL.achStats().total, '成就没有全部解锁');
+
+/* 清空存档的确认弹窗 */
+ui.askResetAll();
+window.doConfirmOK();
+assert(TL.S === null, '确认「清空存档」后当前人生仍然存在');
+section('确认弹窗动作派发（放弃本世 / 结束本世 / 解锁成就 / 清空存档）');
 
 console.log('======== 无头逻辑自检报告 ========');
 console.log('模拟人生局数        : ' + lives + '（死亡 ' + deaths + ' 局，含服刑 ' + prisonLives + ' 局）');

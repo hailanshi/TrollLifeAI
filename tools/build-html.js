@@ -27,6 +27,8 @@ const data = {
   city: readJson(path.join(ROOT, 'assets', 'json', 'city.json')),
   event: readJson(path.join(ROOT, 'assets', 'json', 'event.json')),
 };
+/* 剧情逻辑规则表（年龄纠偏 + 前提校验），网页版与 Flutter 版共用 */
+const rules = readJson(path.join(ROOT, 'src', 'age-rules.json'));
 
 const jsFiles = ['01_core.js', '02_ach.js', '03_ai.js', '04_actions.js', '05_ui.js'];
 const jsParts = jsFiles.map((f) => '/* ===== ' + f + ' ===== */\n' + read(path.join(ROOT, 'src', 'js', f)));
@@ -55,6 +57,8 @@ const out =
   body +
   '\n<script>\n/* ===== 游戏数据（由 5 份 JSON 合并后内联） ===== */\nwindow.__TL_DATA__ = ' +
   safeJson(data) +
+  ';\n/* ===== 剧情逻辑规则表（年龄纠偏 + 前提校验） ===== */\nwindow.__TL_RULES__ = ' +
+  safeJson(rules) +
   ';\n</script>\n' +
   '<script>\n' + jsParts.join('\n') + '\n</script>\n' +
   '</body>\n</html>\n';

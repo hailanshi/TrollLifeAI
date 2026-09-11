@@ -73,12 +73,30 @@
       '<button class="btn ghost" onclick="window.doConfirmCancel()">取消</button>' +
       '<button class="btn warn" onclick="window.doConfirmOK()">确定</button></div>');
   };
+  /* 解析 'ui.doGiveUp' 这类带命名空间的函数名。
+     历史 bug：以前用 window['ui.doGiveUp'] 取值，永远取不到（点在 window.ui 上），
+     导致所有确认弹窗都报「动作丢失」（放弃本世/转世、清空存档、解锁全部成就都失效）。 */
+  function resolveAction(path) {
+    try {
+      var parts = String(path || '').split('.');
+      var obj = window, fn = null, ctx = null;
+      for (var i = 0; i < parts.length; i++) {
+        if (!obj) { return null; }
+        ctx = obj;
+        fn = obj[parts[i]];
+        obj = fn;
+      }
+      if (typeof fn !== 'function') { return null; }
+      return { fn: fn, ctx: ctx };
+    } catch (e) { return null; }
+  }
+
   window.doConfirmOK = function () {
     var c = window.__confirm;
     if (!c) { return; }
     try {
-      var fn = window[c.fn];
-      if (typeof fn === 'function') { fn.apply(null, c.args || []); }
+      var target = resolveAction(c.fn);
+      if (target) { target.fn.apply(target.ctx, c.args || []); }
       else { window.toast('动作丢失：' + c.fn); }
     } catch (e) { window.toast('执行失败：' + e.message); }
     /* 注意：先执行，再关闭弹窗；关闭时不提前清空回调变量 */

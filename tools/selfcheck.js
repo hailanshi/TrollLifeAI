@@ -105,11 +105,39 @@ check('无外部 script src', !/<script[^>]+src=/i.test(app));
 check('无外部 link href', !/<link[^>]+href=/i.test(app));
 check('无外部图片/字体 URL', !/url\(\s*['"]?https?:/i.test(app));
 
-/* 7. 数据内联与统计 */
-const dataMatch = /window\.__TL_DATA__\s*=\s*(\{[\s\S]*?\});\n<\/script>/.exec(app);
-let data = null;
-try { data = JSON.parse(dataMatch[1].replace(/<\\\//g, '</')); } catch (e) { }
+/* 7. 数据内联与统计（数据块里现在有 __TL_DATA__ 与 __TL_RULES__ 两条赋值，用括号配对法提取） */
+function extractAssignment(src, name) {
+  const key = 'window.' + name;
+  const at = src.indexOf(key);
+  if (at === -1) { return null; }
+  const start = src.indexOf('{', at);
+  if (start === -1) { return null; }
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < src.length; i++) {
+    const ch = src[i];
+    if (inStr) {
+      if (esc) { esc = false; }
+      else if (ch === '\\') { esc = true; }
+      else if (ch === '"') { inStr = false; }
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') { depth++; }
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        const raw = src.slice(start, i + 1).replace(/<\\\//g, '</').replace(/<\\!--/g, '<!--');
+        try { return JSON.parse(raw); } catch (e) { return null; }
+      }
+    }
+  }
+  return null;
+}
+const data = extractAssignment(app, '__TL_DATA__');
+const rulesInline = extractAssignment(app, '__TL_RULES__');
 check('内联数据可解析', !!data, data ? '' : '解析失败');
+check('内联规则表可解析', !!rulesInline && Array.isArray(rulesInline.ageRules),
+  rulesInline ? ('ageRules ' + rulesInline.ageRules.length + ' 条 / preconditions ' + (rulesInline.preconditions || []).length + ' 条') : '解析失败');
 if (data) {
   check('事件数量 ≥ 155', data.event.length >= 155, '实际 ' + data.event.length);
   check('天赋数量 ≥ 44', data.talents.length >= 44, '实际 ' + data.talents.length);
@@ -145,6 +173,16 @@ check('AI Key 仅存本机（独立 localStorage 键，不随存档导出）',
   /TL\.AI_KEY\s*=\s*'tlai_ai_v1'/.test(inlineJs) && /exportSave[\s\S]{0,300}version: 1, exportedAt/.test(inlineJs));
 check('底部导航 6 个页签（含 AI）', (app.match(/id="tab_\w+"/g) || []).length === 6 && /id="tab_ai"/.test(app));
 check('AI 页签回调已挂 window', /ui\.aiSave\s*=\s*function/.test(inlineJs) && /ui\.aiTest\s*=\s*function/.test(inlineJs));
+
+/* 9.5 剧情逻辑规则已内联（年龄纠偏 + 前提校验） */
+check('规则表已内联进 app.html（window.__TL_RULES__）',
+  /window\.__TL_RULES__\s*=/.test(app) && /"ageRules"/.test(app) && /"preconditions"/.test(app));
+check('引擎按规则收窄年龄区间', /effectiveAgeRange/.test(inlineJs) && /TL\.RULES\.ageRules/.test(inlineJs));
+check('引擎做剧情前提校验', /preconditionReason/.test(inlineJs) && /NEED_CHECKS/.test(inlineJs));
+check('事件池三级兜底（不会因为过滤没事件可抽）',
+  /fallback1/.test(inlineJs) && /fallback2/.test(inlineJs) && /use = pool\.length/.test(inlineJs));
+check('确认弹窗支持命名空间动作（ui.xxx）',
+  /function resolveAction/.test(inlineJs) && /resolveAction\(c\.fn\)/.test(inlineJs));
 check('展示文本剥离剧情标记（剧情/选项/日志/标题）',
   /stripMarks\(ev\.story\)/.test(inlineJs) &&
   /stripMarks\(ev\.choices\[i\]\.desc\)/.test(inlineJs) &&

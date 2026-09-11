@@ -572,12 +572,78 @@
   };
 
   /* ---------------- 事件抽取 ---------------- */
+  /* ---------------- 剧情逻辑规则（年龄纠偏 + 前提校验） ---------------- */
+  /* 规则表来自 src/age-rules.json，由构建脚本内联；网页版与 Flutter 版共用同一份。 */
+  TL.RULES = window.__TL_RULES__ || { ageRules: [], preconditions: [] };
+
+  /* 事件全文（标题+剧情+全部选项文本），用于关键词匹配 */
+  TL.eventText = function (ev) {
+    var t = (ev.title || '') + ' ' + (ev.story || '');
+    var cs = ev.choices || [];
+    for (var i = 0; i < cs.length; i++) {
+      t += ' ' + (cs[i].option_text || '') + ' ' + (cs[i].desc || '');
+    }
+    return t;
+  };
+
+  /* 年龄纠偏：按规则表收窄 age_range（只收窄，绝不放大；出现矛盾区间则放弃纠偏） */
+  TL.effectiveAgeRange = function (ev) {
+    var a = ev.age_range ? ev.age_range[0] : 0;
+    var b = ev.age_range ? ev.age_range[1] : 110;
+    var lo = a, hi = b;
+    var text = TL.eventText(ev);
+    var rules = TL.RULES.ageRules || [];
+    for (var i = 0; i < rules.length; i++) {
+      var r = rules[i];
+      if (!r.kw) { continue; }
+      if (!(new RegExp(r.kw).test(text))) { continue; }
+      if (typeof r.min === 'number' && r.min > lo) { lo = r.min; }
+      if (typeof r.max === 'number' && r.max < hi) { hi = r.max; }
+    }
+    if (lo > hi) { return [a, b]; }   /* 规则互相冲突：保留原区间，避免事件永远不出现 */
+    /* 数据里的 100 是「终身」的意思，不是硬上限：否则 101 岁以上会没有任何事件可抽 */
+    if (hi === 100) { hi = 110; }
+    return [lo, hi];
+  };
+
+  /* 前提校验：没配偶就不该离婚、没宠物就不该宠物离世…… */
+  TL.NEED_CHECKS = {
+    partner: function (s) { return (TL.relCount('spouse') + TL.relCount('lover')) > 0; },
+    child: function (s) { return TL.relCount('child') > 0; },
+    pet: function (s) { return TL.alivePetCount(s) > 0; },
+    convict: function (s) { return s.prison > 0 || !!s.flags.record; },
+    job: function (s) { return !!(s.job && s.salary > 0); }
+  };
+
+  TL.alivePetCount = function (s) {
+    var n = 0;
+    for (var i = 0; i < s.pets.length; i++) { if (s.pets[i].alive) { n++; } }
+    return n;
+  };
+
+  /* 返回空串表示允许；否则返回不允许的原因（便于日志与调试） */
+  TL.preconditionReason = function (ev, s) {
+    if (!s) { return ''; }
+    var text = TL.eventText(ev);
+    var rules = TL.RULES.preconditions || [];
+    for (var i = 0; i < rules.length; i++) {
+      var r = rules[i];
+      if (!r.kw || !r.need) { continue; }
+      if (!(new RegExp(r.kw).test(text))) { continue; }
+      if (r.exclude && new RegExp(r.exclude).test(text)) { continue; }
+      var fn = TL.NEED_CHECKS[r.need];
+      if (fn && !fn(s)) { return r.reason || r.id; }
+    }
+    return '';
+  };
+
   TL.eventEra = function (ev) {
     var m = /^【(80|90|00|10|20)年代】/.exec(ev.title || '');
     return m ? m[1] : '';
   };
   TL.eventMatch = function (ev, age, era) {
-    if (!ev.age_range || age < ev.age_range[0] || age > ev.age_range[1]) { return false; }
+    var r = TL.effectiveAgeRange(ev);      /* 年龄纠偏后的有效区间 */
+    if (age < r[0] || age > r[1]) { return false; }
     var e = TL.eventEra(ev);
     if (e && e !== era) { return false; }
     /* 年代标记（写在 desc 里）也要匹配 */
@@ -587,17 +653,34 @@
     while ((m = re.exec(ds)) !== null) { if (m[1] !== era) { return false; } }
     return true;
   };
+
   TL.randomEvent = function () {
     var s = TL.S;
-    var pool = [], fresh = [];
+    /* 三级兜底，保证任何情况下都能抽到事件，不会卡住：
+       ① 年龄合规 + 前提满足 → ② 只要求年龄合规 → ③ 只要求年龄区间匹配 */
+    var pool = [], fresh = [], fallback1 = [], fallback2 = [];
     for (var i = 0; i < TL.DATA.event.length; i++) {
       var ev = TL.DATA.event[i];
-      if (!TL.eventMatch(ev, s.age, s.era)) { continue; }
+      var r = TL.effectiveAgeRange(ev);
+      var ageOk = (s.age >= r[0] && s.age <= r[1]);
+      if (!ageOk) { continue; }
+      fallback2.push(ev);
+      var eraOk = true;
+      var e = TL.eventEra(ev);
+      if (e && e !== s.era) { eraOk = false; }
+      if (eraOk) { fallback1.push(ev); }
+      if (!eraOk) { continue; }
+      if (TL.preconditionReason(ev, s)) { continue; }
       pool.push(ev);
       if (!TL.has(s.usedTitles, ev.title)) { fresh.push(ev); }
     }
-    if (!pool.length) { return null; }
-    var ev2 = fresh.length ? TL.pick(fresh) : TL.pick(pool);
+    var use = pool.length ? pool : (fallback1.length ? fallback1 : fallback2);
+    if (!use.length) { return null; }
+    var freshUse = [];
+    for (var j = 0; j < use.length; j++) {
+      if (!TL.has(s.usedTitles, use[j].title)) { freshUse.push(use[j]); }
+    }
+    var ev2 = freshUse.length ? TL.pick(freshUse) : TL.pick(use);
     s.usedTitles.push(ev2.title);
     if (s.usedTitles.length > 400) { s.usedTitles.shift(); }
     return ev2;
