@@ -1,0 +1,32 @@
+[
+    {
+        "cityName": "小县城",
+        "eraFactor": {"80":true,"90":true,"00":true,"10":true,"20":true},
+        "desc": "生活压力低，房价便宜，薪资上限不高，人际关系紧密",
+        "attrEffect": {"压力值":-2,"财富上限":0.6}
+    },
+    {
+        "cityName": "二线城市",
+        "eraFactor": {"80":false,"90":true,"00":true,"10":true,"20":true},
+        "desc": "机会适中，房价中等，适合普通人奋斗",
+        "attrEffect": {"压力值":0,"财富上限":1.0}
+    },
+    {
+        "cityName": "一线城市",
+        "eraFactor": {"80":false,"90":true,"00":true,"10":true,"20":true},
+        "desc": "大量机遇，高薪岗位多，房价高，生活压力巨大",
+        "attrEffect": {"压力值":4,"财富上限":1.6}
+    },
+    {
+        "cityName": "北上广深",
+        "eraFactor": {"80":false,"90":true,"00":true,"10":true,"20":true},
+        "desc": "时代风口聚集地，暴富机会多，生存压力极大",
+        "attrEffect": {"压力值":6,"财富上限":2.0}
+    },
+    {
+        "cityName": "海外",
+        "eraFactor": {"80":false,"90":false,"00":true,"10":true,"20":true},
+        "desc": "异国生活，机遇与文化冲突并存，移民难度高",
+        "attrEffect": {"压力值":3,"财富上限":1.8}
+    }
+]

@@ -1,0 +1,17 @@
+# TrollLifeAI 静态分析配置
+#
+# 说明：本工程不引入任何除 provider 之外的第三方包，
+# 因此分析规则仅使用 flutter_lints 官方推荐集合。
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    # 未使用的 import / 变量只是提示，不影响构建
+    unused_import: warning
+    unused_local_variable: warning
+
+linter:
+  rules:
+    # 关闭与「中文注释 / 单文件多类」冲突的少量规则，保持工程可读性
+    avoid_print: false
+    prefer_single_quotes: false

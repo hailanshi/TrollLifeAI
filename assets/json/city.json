@@ -1,0 +1,137 @@
+[
+    {
+        "cityName": "小县城",
+        "eraFactor": {
+            "10": true,
+            "20": true,
+            "80": true,
+            "90": true,
+            "00": true
+        },
+        "desc": "生活压力低，房价便宜，薪资上限不高，人际关系紧密",
+        "attrEffect": {
+            "压力值": -2,
+            "财富上限": 0.6
+        }
+    },
+    {
+        "cityName": "二线城市",
+        "eraFactor": {
+            "10": true,
+            "20": true,
+            "80": false,
+            "90": true,
+            "00": true
+        },
+        "desc": "机会适中，房价中等，适合普通人奋斗",
+        "attrEffect": {
+            "压力值": 0,
+            "财富上限": 1
+        }
+    },
+    {
+        "cityName": "一线城市",
+        "eraFactor": {
+            "10": true,
+            "20": true,
+            "80": false,
+            "90": true,
+            "00": true
+        },
+        "desc": "大量机遇，高薪岗位多，房价高，生活压力巨大",
+        "attrEffect": {
+            "压力值": 4,
+            "财富上限": 1.6
+        }
+    },
+    {
+        "cityName": "北上广深",
+        "eraFactor": {
+            "10": true,
+            "20": true,
+            "80": false,
+            "90": true,
+            "00": true
+        },
+        "desc": "时代风口聚集地，暴富机会多，生存压力极大",
+        "attrEffect": {
+            "压力值": 6,
+            "财富上限": 2
+        }
+    },
+    {
+        "cityName": "海外",
+        "eraFactor": {
+            "10": true,
+            "20": true,
+            "80": false,
+            "90": false,
+            "00": true
+        },
+        "desc": "异国生活，机遇与文化冲突并存，移民难度高",
+        "attrEffect": {
+            "压力值": 3,
+            "财富上限": 1.8
+        }
+    },
+    {
+        "cityName": "乡镇农村",
+        "eraFactor": {
+            "10": true,
+            "20": true,
+            "80": true,
+            "90": true,
+            "00": true
+        },
+        "desc": "最慢的生活节奏，最便宜的物价，收入天花板也最低",
+        "attrEffect": {
+            "压力值": -3,
+            "财富上限": 0.5
+        }
+    },
+    {
+        "cityName": "三线城市",
+        "eraFactor": {
+            "10": true,
+            "20": true,
+            "80": true,
+            "90": true,
+            "00": true
+        },
+        "desc": "房价友好，工作稳定，生活松弛，机会不算多",
+        "attrEffect": {
+            "压力值": -1,
+            "财富上限": 0.8
+        }
+    },
+    {
+        "cityName": "省会城市",
+        "eraFactor": {
+            "10": true,
+            "20": true,
+            "80": true,
+            "90": true,
+            "00": true
+        },
+        "desc": "省内资源集中地，机会与压力都处在中间档",
+        "attrEffect": {
+            "压力值": 2,
+            "财富上限": 1.2
+        }
+    },
+    {
+        "cityName": "新一线城市",
+        "eraFactor": {
+            "10": true,
+            "20": true,
+            "80": false,
+            "90": true,
+            "00": true
+        },
+        "desc": "新兴互联网与制造业中心，薪资高、内卷严重",
+        "attrEffect": {
+            "压力值": 5,
+            "财富上限": 1.4
+        }
+    }
+]

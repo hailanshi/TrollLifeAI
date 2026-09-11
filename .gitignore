@@ -1,0 +1,40 @@
+# ==== 生成物（可随时用 tools/ 里的脚本重建）====
+build/shots/
+build/*.html
+build/dom*.txt
+build/data-report.json
+build/inline-check.js
+
+# ==== 保留（构建/校验需要，务必提交）====
+!build/patches/
+!build/originals/
+
+# ==== Flutter 平台目录（在本地用 flutter create . 生成，不入库）====
+flutter_trolllifeai/android/
+flutter_trolllifeai/ios/
+flutter_trolllifeai/web/
+flutter_trolllifeai/linux/
+flutter_trolllifeai/macos/
+flutter_trolllifeai/windows/
+flutter_trolllifeai/.dart_tool/
+flutter_trolllifeai/build/
+flutter_trolllifeai/.flutter-plugins*
+flutter_trolllifeai/pubspec.lock
+
+# ==== iOS 壳的编译中间产物 ====
+ios-shell/TrollLifeApp/build/
+ios-shell/TrollLifeApp/*.xcodeproj/
+ios-shell/TrollLifeApp/build.log
+
+# ==== 密钥与本地配置：绝对不要提交 ====
+*.key
+*apikey*
+*api_key*
+.env
+.env.*
+secrets.json
+
+# ==== 系统垃圾 ====
+.DS_Store
+Thumbs.db
+*.swp

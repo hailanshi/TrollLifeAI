@@ -1,0 +1,62 @@
+[
+    {
+        "skillId": "programming",
+        "name": "编程",
+        "desc": "掌握编程技能，互联网求职、副业接单更容易成功",
+        "effect": "IT职业事件成功率提升，副业额外财富收益"
+    },
+    {
+        "skillId": "cooking",
+        "name": "厨艺",
+        "desc": "擅长做饭，家庭幸福感更高，可从事餐饮相关工作",
+        "effect": "家庭快乐小幅加成，餐饮类职业收益提升"
+    },
+    {
+        "skillId": "painting",
+        "name": "绘画",
+        "desc": "绘画艺术，自媒体、文创相关事件更容易出圈",
+        "effect": "艺术自媒体收益提升，魅力小幅加成"
+    },
+    {
+        "skillId": "music",
+        "name": "音乐",
+        "desc": "精通乐器/歌唱，演艺、短视频事件更容易爆火",
+        "effect": "演艺自媒体爆火概率增加"
+    },
+    {
+        "skillId": "foreign_language",
+        "name": "外语",
+        "desc": "熟练外语，外企、出国移民机会增多",
+        "effect": "外企求职、移民事件成功率提升"
+    },
+    {
+        "skillId": "medical",
+        "name": "医护知识",
+        "desc": "懂得基础医疗，生病恢复更快",
+        "effect": "疾病事件健康损失降低"
+    },
+    {
+        "skillId": "sport",
+        "name": "竞技体育",
+        "desc": "擅长体育运动，体育赛事容易获奖",
+        "effect": "体育比赛事件更容易拿到奖金、提升名声"
+    },
+    {
+        "skillId": "business",
+        "name": "商务谈判",
+        "desc": "擅长谈判，创业、投资谈判更占优势",
+        "effect": "创业谈判成功率提升，交易亏损减少"
+    },
+    {
+        "skillId": "photography",
+        "name": "摄影",
+        "desc": "摄影技术，短视频内容质量更高",
+        "effect": "自媒体涨粉速度提升"
+    },
+    {
+        "skillId": "car_repair",
+        "name": "汽修",
+        "desc": "车辆维修手艺，可以开店打工",
+        "effect": "汽修相关职业稳定收益"
+    }
+]

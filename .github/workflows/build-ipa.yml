@@ -1,0 +1,146 @@
+name: Build TrollLifeAI IPA
+
+# 云端 macOS 编译出 TrollStore 可直接安装的 ipa（未加密 cryptid=0、arm64、iOS 12+）
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - '**.html'
+      - 'ios-shell/**'
+      - 'src/**'
+      - 'assets/**'
+      - '.github/workflows/build-ipa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # 必须用 macOS 15（Xcode 16）：macos-14 的 Xcode 15.4 读不了新格式工程文件
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcode-select -p
+          sw_vers
+
+      - name: Install xcodegen
+        run: |
+          brew update >/dev/null 2>&1 || true
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Check shell inputs
+        run: |
+          set -e
+          ls -l ios-shell/TrollLifeApp
+          ls -l ios-shell/TrollLifeApp/Resources
+          test -f ios-shell/TrollLifeApp/Resources/index.html || { echo "缺少 Resources/index.html"; exit 1; }
+          test -f ios-shell/TrollLifeApp/Resources/AppIcon60x60@2x.png || { echo "缺少 2x 图标"; exit 1; }
+          test -f ios-shell/TrollLifeApp/Resources/AppIcon60x60@3x.png || { echo "缺少 3x 图标"; exit 1; }
+
+      - name: Generate Xcode project
+        working-directory: ios-shell/TrollLifeApp
+        run: xcodegen generate
+
+      - name: Build app (真实退出码)
+        working-directory: ios-shell/TrollLifeApp
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project TrollLifeApp.xcodeproj \
+            -scheme TrollLifeApp \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee build.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Verify binary exists (防空壳包)
+        working-directory: ios-shell/TrollLifeApp
+        run: |
+          APP="build/Build/Products/Release-iphoneos/TrollLifeApp.app"
+          echo "APP=$APP"
+          ls -l "$APP" || true
+          test -f "$APP/TrollLifeApp" || { echo "!!! 主程序缺失，编译实际失败"; tail -60 build.log; exit 1; }
+          file "$APP/TrollLifeApp"
+          lipo -info "$APP/TrollLifeApp" || true
+
+      - name: Package IPA
+        run: |
+          set -e
+          APP="$GITHUB_WORKSPACE/ios-shell/TrollLifeApp/build/Build/Products/Release-iphoneos/TrollLifeApp.app"
+          RES="$GITHUB_WORKSPACE/ios-shell/TrollLifeApp/Resources"
+
+          # 1) 手动把页面与图标拷进 .app（双保险，避免 xcodegen 资源阶段被跳过）
+          cp "$RES/index.html" "$APP/index.html"
+          mkdir -p "$APP/www"
+          cp "$RES/index.html" "$APP/www/index.html"
+          cp "$RES/AppIcon60x60@2x.png" "$APP/"
+          cp "$RES/AppIcon60x60@3x.png" "$APP/"
+
+          # 2) ad-hoc 伪签名（TrollStore 可安装）
+          codesign --force --sign - "$APP"
+          codesign -dv "$APP" 2>&1 | head -20 || true
+
+          # 3) 打 ipa
+          rm -rf "$GITHUB_WORKSPACE/_payload"
+          mkdir -p "$GITHUB_WORKSPACE/_payload/Payload"
+          cp -R "$APP" "$GITHUB_WORKSPACE/_payload/Payload/"
+          cd "$GITHUB_WORKSPACE/_payload"
+          zip -qry "$GITHUB_WORKSPACE/TrollLifeAI.ipa" Payload
+          cd "$GITHUB_WORKSPACE"
+          ls -lh TrollLifeAI.ipa
+
+      - name: Verify IPA contents
+        run: |
+          set -e
+          unzip -l TrollLifeAI.ipa | grep -E 'Payload/TrollLifeApp.app/(TrollLifeApp|index.html)' \
+            || { echo "!!! ipa 里缺少主程序或 index.html"; unzip -l TrollLifeAI.ipa; exit 1; }
+          unzip -l TrollLifeAI.ipa | grep -E 'AppIcon60x60@(2x|3x).png' \
+            || { echo "!!! ipa 里缺少图标"; exit 1; }
+          unzip -l TrollLifeAI.ipa | grep -q 'www/index.html' || { echo "!!! 缺少 www/index.html 副本"; exit 1; }
+          echo "ipa 结构校验通过"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrollLifeAI-ipa
+          path: ${{ github.workspace }}/TrollLifeAI.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: ios-shell/TrollLifeApp/build.log
+          if-no-files-found: ignore
+
+      - name: Publish build log on failure (便于排查)
+        if: failure()
+        run: |
+          echo "===== 编译失败，最后 80 行日志 ====="
+          tail -80 ios-shell/TrollLifeApp/build.log || true
+          mkdir -p /tmp/dbglog
+          cp ios-shell/TrollLifeApp/build.log /tmp/dbglog/build.log 2>/dev/null || echo "no log" > /tmp/dbglog/build.log
+          cd /tmp/dbglog
+          git init -q
+          git checkout -q -b debug-log
+          git add -A
+          git -c user.email=ci@example.com -c user.name=ci-bot commit -qm "build log for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" debug-log || true

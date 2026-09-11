@@ -1,0 +1,26 @@
+[
+    {
+        "cityName": "乡镇农村",
+        "eraFactor": {"80":true,"90":true,"00":true,"10":true,"20":true},
+        "desc": "最慢的生活节奏，最便宜的物价，收入天花板也最低",
+        "attrEffect": {"压力值":-3,"财富上限":0.5}
+    },
+    {
+        "cityName": "三线城市",
+        "eraFactor": {"80":true,"90":true,"00":true,"10":true,"20":true},
+        "desc": "房价友好，工作稳定，生活松弛，机会不算多",
+        "attrEffect": {"压力值":-1,"财富上限":0.8}
+    },
+    {
+        "cityName": "省会城市",
+        "eraFactor": {"80":true,"90":true,"00":true,"10":true,"20":true},
+        "desc": "省内资源集中地，机会与压力都处在中间档",
+        "attrEffect": {"压力值":2,"财富上限":1.2}
+    },
+    {
+        "cityName": "新一线城市",
+        "eraFactor": {"80":false,"90":true,"00":true,"10":true,"20":true},
+        "desc": "新兴互联网与制造业中心，薪资高、内卷严重",
+        "attrEffect": {"压力值":5,"财富上限":1.4}
+    }
+]

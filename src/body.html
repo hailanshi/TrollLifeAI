@@ -1,0 +1,34 @@
+<body>
+<div id="topbar" class="safe-top">
+  <div id="topbarInner">
+    <div id="appTitle">TrollLifeAI<small id="titleSub">人生重开模拟器</small></div>
+    <div id="topRight">
+      <span class="chip" id="chipAge">年龄 --</span>
+      <span class="chip" id="chipEra">年代 --</span>
+    </div>
+  </div>
+</div>
+
+<div id="screen"></div>
+
+<div id="nav" class="safe-bottom">
+  <div class="tab on" id="tab_home"  onclick="window.ui.go('home')"><b>◈</b>属性</div>
+  <div class="tab"    id="tab_ai"    onclick="window.ui.go('ai')"><b>✧</b>AI</div>
+  <div class="tab"    id="tab_skill" onclick="window.ui.go('skill')"><b>✦</b>技能</div>
+  <div class="tab"    id="tab_ach"   onclick="window.ui.go('ach')"><b>★</b>成就</div>
+  <div class="tab"    id="tab_re"    onclick="window.ui.go('re')"><b>↻</b>轮回</div>
+  <div class="tab"    id="tab_god"   onclick="window.ui.go('god')"><b>⌘</b>控制台</div>
+</div>
+
+<div id="modalRoot">
+  <div class="modal" id="modalBox">
+    <div class="modalHead">
+      <h2 id="mTitle">标题</h2>
+      <div class="sub" id="mSub"></div>
+    </div>
+    <div class="modalBody" id="mBody"></div>
+    <div class="modalFoot" id="mFoot"></div>
+  </div>
+</div>
+
+<div id="toast"></div>

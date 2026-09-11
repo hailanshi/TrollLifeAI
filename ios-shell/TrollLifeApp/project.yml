@@ -1,0 +1,60 @@
+# xcodegen 工程描述 —— 壳工程（TrollLifeApp）
+# 生成： cd ios-shell/TrollLifeApp && xcodegen generate
+name: TrollLifeApp
+
+options:
+  bundleIdPrefix: com.trolllife
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "12.0"
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: "NO"
+    IPHONEOS_DEPLOYMENT_TARGET: "12.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    ENABLE_BITCODE: "NO"
+    CLANG_ENABLE_MODULES: "YES"
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+    GCC_C_LANGUAGE_STANDARD: gnu11
+    CLANG_ENABLE_OBJC_ARC: "YES"
+
+targets:
+  TrollLifeApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "12.0"
+    sources:
+      - path: main.m
+      - path: AppDelegate.h
+      - path: AppDelegate.m
+      - path: ViewController.h
+      - path: ViewController.m
+      # index.html 与两张图标随 bundle 一起打包（构建脚本还会再手动拷一份做双保险）
+      - path: Resources
+        buildPhase: resources
+    settings:
+      base:
+        INFOPLIST_FILE: Info.plist
+        PRODUCT_NAME: TrollLifeApp
+        PRODUCT_BUNDLE_IDENTIFIER: com.trolllife.ai
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        GENERATE_INFOPLIST_FILE: "NO"
+    dependencies:
+      - sdk: UIKit.framework
+      - sdk: WebKit.framework
+      - sdk: Foundation.framework
+
+schemes:
+  TrollLifeApp:
+    build:
+      targets:
+        TrollLifeApp: all
+    run:
+      config: Release
+    archive:
+      config: Release
