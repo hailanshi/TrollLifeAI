@@ -18,7 +18,9 @@
 @interface ViewController ()
 @property (nonatomic, assign) BOOL didLoadPage;
 @property (nonatomic, strong) UIButton *diagButton;
-@property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, weak) TLDiagnosticViewController *diagVC;
+@property (nonatomic, assign) NSInteger testLevel;   /* 0=正常启动 1/2/3=分级测试 */
+@property (nonatomic, assign) BOOL webViewCreatedInTest;
 @end
 
 @implementation ViewController
@@ -63,10 +65,17 @@
 #pragma mark - WKWebView 搭建（每一步都留面包屑）
 
 - (void)setupWebView {
-    TLMarkStage(@"WKWebView 搭建开始");
+    if ([self createWebViewWithTag:@"正常启动"]) {
+        [self loadLocalIndexHTML];
+    }
+}
+
+/* 只负责把 WKWebView 建出来（分级测试与正常启动共用）；返回是否成功 */
+- (BOOL)createWebViewWithTag:(NSString *)tag {
+    TLMarkStage([NSString stringWithFormat:@"%@：WKWebView 搭建开始", tag]);
 
     WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
-    TLMarkStage(@"WKWebViewConfiguration 创建完成");
+    TLMarkStage([NSString stringWithFormat:@"%@：WKWebViewConfiguration 创建完成", tag]);
 
     config.allowsInlineMediaPlayback = YES;
     if (@available(iOS 10.0, *)) {
@@ -78,14 +87,14 @@
     @try {
         [config.userContentController addScriptMessageHandler:self name:@"nativeFetch"];
         [config.userContentController addScriptMessageHandler:self name:@"nativeHttp"];
-        TLMarkStage(@"原生通道 nativeFetch/nativeHttp 注册完成");
+        TLMarkStage([NSString stringWithFormat:@"%@：原生通道注册完成", tag]);
     } @catch (NSException *e) {
         TLLog(@"‼️ 注册原生通道失败（不致命，继续）: %@", e.reason);
     }
 
     CGRect frame = self.view.bounds;
     self.webView = [[WKWebView alloc] initWithFrame:frame configuration:config];
-    TLMarkStage(@"WKWebView 实例创建完成");
+    TLMarkStage([NSString stringWithFormat:@"%@：WKWebView 实例创建完成", tag]);
 
     self.webView.navigationDelegate = self;
     self.webView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -102,21 +111,22 @@
         self.webView.scrollView.maximumZoomScale = 1.0;
         self.webView.scrollView.minimumZoomScale = 1.0;
         self.webView.scrollView.showsHorizontalScrollIndicator = NO;
-        TLMarkStage(@"scrollView 缩放与安全区设置完成");
+        TLMarkStage([NSString stringWithFormat:@"%@：scrollView 设置完成", tag]);
     } @catch (NSException *e) {
         TLLog(@"‼️ 设置 scrollView 属性失败（不致命）: %@", e.reason);
     }
 
-    [self.view addSubview:self.webView];
-    TLMarkStage(@"WKWebView 已加入视图层级");
+    [self.view insertSubview:self.webView atIndex:0];
+    TLMarkStage([NSString stringWithFormat:@"%@：WKWebView 已加入视图层级", tag]);
 
     [self installDiagButton];
-    [self loadLocalIndexHTML];
+    return YES;
 }
 
 /* 右上角常驻「诊断」小按钮：页面白屏/异常时也能随时看到日志 */
 - (void)installDiagButton {
     @try {
+        if (self.diagButton) { [self.diagButton removeFromSuperview]; self.diagButton = nil; }
         self.diagButton = [UIButton buttonWithType:UIButtonTypeSystem];
         [self.diagButton setTitle:@"诊断" forState:UIControlStateNormal];
         self.diagButton.titleLabel.font = [UIFont systemFontOfSize:11];
@@ -162,6 +172,8 @@
         [self.webView removeFromSuperview];
         self.webView = nil;
         for (UIView *v in self.view.subviews) { [v removeFromSuperview]; }
+        self.diagVC = nil;
+        self.testLevel = 0;
         [self setupWebView];
     } @catch (NSException *e) {
         TLLog(@"‼️ 重试失败: %@", e.reason);
@@ -174,19 +186,79 @@
     @try {
         for (UIView *v in self.view.subviews) { [v removeFromSuperview]; }
         TLDiagnosticViewController *vc = [TLDiagnosticViewController make];
+        vc.showTestLadder = YES;              /* 安全模式下给出分级测试按钮 */
         __weak typeof(self) weakSelf = self;
         vc.onRetryWebView = ^{
             TLSetSafeMode(NO);
             [weakSelf retryWebView];
         };
+        vc.onRunLevel = ^(NSInteger level) {
+            [weakSelf runTestLevel:level];
+        };
+        self.diagVC = vc;
         [self addChildViewController:vc];
         vc.view.frame = self.view.bounds;
         vc.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         [self.view addSubview:vc.view];
         [vc didMoveToParentViewController:self];
-        TLMarkStage(@"诊断页已挂载为根视图");
+        TLMarkStage(@"诊断页已挂载为根视图（含分级测试）");
     } @catch (NSException *e) {
         TLLog(@"‼️ 挂载诊断页失败: %@", e.reason);
+    }
+}
+
+#pragma mark - 分级测试（在手机上自己二分定位崩溃点）
+
+/*  1 = 只创建 WKWebView，不加载任何页面
+ *  2 = 创建并加载一个最小 HTML
+ *  3 = 创建并加载正式的 index.html（成功后自动退出安全模式）
+ *  哪一级崩了，下次打开日志里最后一条阶段就是「分级测试第 N 级：…」 */
+- (void)runTestLevel:(NSInteger)level {
+    self.testLevel = level;
+    TLMarkStage([NSString stringWithFormat:@"分级测试第 %ld 级：开始", (long)level]);
+    @try {
+        [self.webView removeFromSuperview];
+        self.webView = nil;
+        [self createWebViewWithTag:[NSString stringWithFormat:@"分级测试第 %ld 级", (long)level]];
+
+        if (level >= 3) {
+            TLMarkStage(@"分级测试第 3 级：准备加载正式页面");
+            [self loadLocalIndexHTML];
+        } else if (level == 2) {
+            TLMarkStage(@"分级测试第 2 级：加载最小 HTML");
+            [self.webView loadHTMLString:
+                @"<html><head><meta name='viewport' content='width=device-width,initial-scale=1'></head>"
+                @"<body style='background:#0D0F12;color:#7FD1AE;font-family:-apple-system;padding:28px'>"
+                @"<h2>最小页面 OK</h2><p>能看到这行字说明 WKWebView 本身工作正常。</p></body></html>"
+                                baseURL:nil];
+        } else {
+            TLMarkStage(@"分级测试第 1 级：WebView 创建成功，未加载页面");
+            [self.diagVC appendNote:@"① 通过：WKWebView 创建成功，可以继续点 ②。"];
+        }
+    } @catch (NSException *e) {
+        TLLog(@"‼️ 分级测试第 %ld 级抛异常: %@", (long)level, e.reason);
+        [self.diagVC appendNote:[NSString stringWithFormat:@"第 %ld 级抛异常：%@", (long)level, e.reason]];
+    }
+}
+
+/* 测试成功后回到正常界面 */
+- (void)finishTestSuccess {
+    TLSetSafeMode(NO);
+    TLMarkReady();
+    TLMarkStage(@"分级测试通过，退出安全模式并显示网页");
+    @try {
+        TLDiagnosticViewController *vc = self.diagVC;
+        if (vc) {
+            [vc willMoveToParentViewController:nil];
+            [vc.view removeFromSuperview];
+            [vc removeFromParentViewController];
+            self.diagVC = nil;
+        }
+        self.testLevel = 0;
+        [self.view bringSubviewToFront:self.webView];
+        [self.view bringSubviewToFront:self.diagButton];
+    } @catch (NSException *e) {
+        TLLog(@"退出诊断界面失败: %@", e.reason);
     }
 }
 
@@ -195,9 +267,17 @@
 - (void)loadLocalIndexHTML {
     TLMarkStage(@"开始查找 index.html");
     NSMutableArray *candidates = [NSMutableArray array];
-    [candidates addObject:[[NSBundle mainBundle] pathForResource:@"index" ofType:@"html"]];
-    [candidates addObject:[[NSBundle mainBundle] pathForResource:@"index" ofType:@"html" inDirectory:@"www"]];
-    [candidates addObject:[[NSBundle mainBundle] pathForResource:@"index" ofType:@"html" inDirectory:@"Resources"]];
+
+    /* ⚠️ 历史踩坑（就是它导致「打开即闪退」）：
+       pathForResource: 找不到资源时返回 nil，而 NSMutableArray 的 addObject: 传 nil 会抛
+       NSInvalidArgumentException（-[__NSArrayM insertObject:atIndex:]: object cannot be nil）。
+       所以每个候选路径都必须先判空再添加。 */
+    NSString *p1 = [[NSBundle mainBundle] pathForResource:@"index" ofType:@"html"];
+    NSString *p2 = [[NSBundle mainBundle] pathForResource:@"index" ofType:@"html" inDirectory:@"www"];
+    NSString *p3 = [[NSBundle mainBundle] pathForResource:@"index" ofType:@"html" inDirectory:@"Resources"];
+    if (p1.length > 0) { [candidates addObject:p1]; } else { TLLog(@"候选路径 index.html(bundle 根) 不存在，跳过"); }
+    if (p2.length > 0) { [candidates addObject:p2]; } else { TLLog(@"候选路径 www/index.html 不存在，跳过"); }
+    if (p3.length > 0) { [candidates addObject:p3]; } else { TLLog(@"候选路径 Resources/index.html 不存在，跳过"); }
 
     NSString *path = nil;
     for (NSString *p in candidates) {
@@ -255,8 +335,15 @@
             if (len <= 0) {
                 TLLog(@"⚠️ 页面渲染为空（白屏），请检查 index.html 是否被正确拷贝、以及 JS 是否报错");
                 TLMarkStage(@"页面白屏：DOM 为空");
+                [self.diagVC appendNote:[NSString stringWithFormat:@"第 %ld 级：页面加载完成但 DOM 为空（白屏）", (long)self.testLevel]];
             } else {
                 TLMarkReady();   /* 到这里说明启动链路完全正常 */
+                if (self.testLevel >= 2) {
+                    [self.diagVC appendNote:[NSString stringWithFormat:@"第 %ld 级通过：页面已渲染，DOM 长度 %ld", (long)self.testLevel, (long)len]];
+                }
+                if (self.testLevel >= 3) {
+                    [self finishTestSuccess];
+                }
             }
         }];
     } @catch (NSException *e) {

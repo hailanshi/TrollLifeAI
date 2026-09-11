@@ -274,6 +274,7 @@ NSString *TLDiagnosticReport(void) {
 /* ---------------- 诊断页（纯 UIKit，不依赖 WebKit） ---------------- */
 @interface TLDiagnosticViewController ()
 @property (nonatomic, strong) UITextView *textView;
+@property (nonatomic, strong) NSMutableString *notes;
 @end
 
 @implementation TLDiagnosticViewController
@@ -286,6 +287,7 @@ NSString *TLDiagnosticReport(void) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithRed:0.05 green:0.06 blue:0.07 alpha:1.0];
+    self.notes = [NSMutableString string];
 
     UILabel *title = [[UILabel alloc] init];
     title.text = TLIsSafeMode() ? @"安全模式 · 启动诊断" : @"运行诊断";
@@ -308,6 +310,48 @@ NSString *TLDiagnosticReport(void) {
     self.textView.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
     self.textView.text = TLDiagnosticReport();
     self.textView.translatesAutoresizingMaskIntoConstraints = NO;
+
+    /* 分级测试：一级一级加压，哪一级崩了就知道崩在哪 */
+    UIView *ladder = nil;
+    if (self.showTestLadder) {
+        UILabel *ladderTitle = [[UILabel alloc] init];
+        ladderTitle.text = @"—— 分级测试（从低到高，崩了就在下一级之前停手）——";
+        ladderTitle.textColor = [UIColor colorWithWhite:0.7 alpha:1];
+        ladderTitle.font = [UIFont systemFontOfSize:11];
+        ladderTitle.textAlignment = NSTextAlignmentCenter;
+        ladderTitle.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.view addSubview:ladderTitle];
+        ladderTitle.tag = 900;
+        [NSLayoutConstraint activateConstraints:@[
+            [ladderTitle.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+            [ladderTitle.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12]
+        ]];
+
+        UIStackView *ladderRow = [[UIStackView alloc] init];
+        ladderRow.axis = UILayoutConstraintAxisHorizontal;
+        ladderRow.distribution = UIStackViewDistributionFillEqually;
+        ladderRow.spacing = 6;
+        ladderRow.translatesAutoresizingMaskIntoConstraints = NO;
+        NSArray *ladderTitles = @[@"① 只建 WebView", @"② 加载最小页", @"③ 加载正式页"];
+        for (NSInteger i = 0; i < ladderTitles.count; i++) {
+            UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+            [b setTitle:ladderTitles[i] forState:UIControlStateNormal];
+            b.titleLabel.font = [UIFont systemFontOfSize:12];
+            b.titleLabel.numberOfLines = 2;
+            b.backgroundColor = [UIColor colorWithRed:0.13 green:0.20 blue:0.17 alpha:1];
+            b.layer.cornerRadius = 10;
+            b.tag = 100 + i;
+            [b addTarget:self action:@selector(onLadder:) forControlEvents:UIControlEventTouchUpInside];
+            [ladderRow addArrangedSubview:b];
+        }
+        [self.view addSubview:ladderRow];
+        ladder = ladderRow;
+        [NSLayoutConstraint activateConstraints:@[
+            [ladderRow.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+            [ladderRow.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+            [ladderRow.heightAnchor constraintEqualToConstant:40]
+        ]];
+    }
 
     UIStackView *buttons = [[UIStackView alloc] init];
     buttons.axis = UILayoutConstraintAxisHorizontal;
@@ -333,7 +377,7 @@ NSString *TLDiagnosticReport(void) {
     [self.view addSubview:buttons];
 
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
-    [NSLayoutConstraint activateConstraints:@[
+    NSMutableArray *cs = [NSMutableArray arrayWithObjects:
         [title.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12],
         [title.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
         [title.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
@@ -345,13 +389,39 @@ NSString *TLDiagnosticReport(void) {
         [self.textView.topAnchor constraintEqualToAnchor:hint.bottomAnchor constant:10],
         [self.textView.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
         [self.textView.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
-        [self.textView.bottomAnchor constraintEqualToAnchor:buttons.topAnchor constant:-10],
 
         [buttons.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
         [buttons.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
         [buttons.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-12],
-        [buttons.heightAnchor constraintEqualToConstant:44]
-    ]];
+        [buttons.heightAnchor constraintEqualToConstant:44],
+        nil];
+
+    if (ladder) {
+        UILabel *ladderTitle = (UILabel *)[self.view viewWithTag:900];
+        [cs addObject:[ladderTitle.topAnchor constraintEqualToAnchor:self.textView.bottomAnchor constant:8]];
+        [cs addObject:[ladder.topAnchor constraintEqualToAnchor:ladderTitle.bottomAnchor constant:6]];
+        [cs addObject:[buttons.topAnchor constraintEqualToAnchor:ladder.bottomAnchor constant:8]];
+    } else {
+        [cs addObject:[self.textView.bottomAnchor constraintEqualToAnchor:buttons.topAnchor constant:-10]];
+    }
+    [NSLayoutConstraint activateConstraints:cs];
+}
+
+- (void)appendNote:(NSString *)note {
+    if (note.length == 0) { return; }
+    @try {
+        [self.notes appendFormat:@"\n>>> %@\n", note];
+        self.textView.text = [NSString stringWithFormat:@"%@%@", TLDiagnosticReport(), self.notes];
+        NSRange bottom = NSMakeRange(self.textView.text.length - 1, 1);
+        [self.textView scrollRangeToVisible:bottom];
+    } @catch (NSException *e) { }
+}
+
+- (void)onLadder:(UIButton *)sender {
+    NSInteger level = sender.tag - 100 + 1;
+    TLLog(@"用户点击分级测试：第 %ld 级", (long)level);
+    [self appendNote:[NSString stringWithFormat:@"开始第 %ld 级测试，若 App 消失请下次打开看日志", (long)level]];
+    if (self.onRunLevel) { self.onRunLevel(level); }
 }
 
 - (void)onButton:(UIButton *)sender {

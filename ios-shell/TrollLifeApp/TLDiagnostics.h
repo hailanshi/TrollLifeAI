@@ -49,5 +49,9 @@ void TLFlush(void);
 /// 诊断页（安全模式与「诊断」按钮共用）
 @interface TLDiagnosticViewController : UIViewController
 @property (nonatomic, copy) void (^onRetryWebView)(void);
+/// 分级测试：1=只创建 WKWebView；2=创建并加载最小页面；3=创建并加载正式页面
+@property (nonatomic, copy) void (^onRunLevel)(NSInteger level);
+@property (nonatomic, assign) BOOL showTestLadder;
+- (void)appendNote:(NSString *)note;
 + (instancetype)make;
 @end

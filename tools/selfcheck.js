@@ -217,6 +217,25 @@ check('安全模式（连续启动失败则跳过 WKWebView）',
   /TLIsSafeMode/.test(vc) && /fails >= 2/.test(fs.readFileSync(path.join(shellDir, 'TLDiagnostics.m'), 'utf8')));
 check('白屏检测（加载完成后再查 DOM 长度）', /页面 DOM 长度/.test(vc));
 
+/* 10.8 历史踩坑防回归：把可能为 nil 的返回值直接 addObject 会抛 NSInvalidArgumentException，
+       第一版就是因此「打开即闪退」（pathForResource 找不到资源时返回 nil）。 */
+const nilRisk = [];
+shellSrc.forEach((f) => {
+  const src = fs.readFileSync(path.join(shellDir, f), 'utf8');
+  src.split('\n').forEach((line, i) => {
+    if (/addObject:\s*\[\[NSBundle mainBundle\]\s*pathForResource/.test(line) ||
+        /addObject:\s*\[[^\]]*pathForResource/.test(line)) {
+      nilRisk.push(f + ':' + (i + 1));
+    }
+  });
+});
+check('未把 pathForResource 返回值直接 addObject（nil 会闪退）', nilRisk.length === 0, nilRisk.join(', '));
+check('index.html 候选路径逐条判空后再加入数组',
+  /if \(p1\.length > 0\)/.test(vc) && /if \(p2\.length > 0\)/.test(vc) && /if \(p3\.length > 0\)/.test(vc));
+check('分级测试阶梯（① 建 WebView ② 最小页 ③ 正式页）',
+  /runTestLevel/.test(vc) && /分级测试第 %ld 级/.test(vc) && /finishTestSuccess/.test(vc) &&
+  /showTestLadder = YES/.test(vc));
+
 /* 11. 工作流避坑点 */
 const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/build-ipa.yml'), 'utf8');
 check('CI 使用 macos-15', /runs-on:\s*macos-15/.test(wf));
