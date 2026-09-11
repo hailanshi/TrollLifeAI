@@ -178,6 +178,45 @@ check('壳内设置 contentInsetAdjustmentNever', /contentInsetAdjustmentBehavio
 check('壳内使用 loadFileURL:allowingReadAccessToURL:', /loadFileURL:.*allowingReadAccessToURL:/.test(vc));
 check('壳内未使用私有 KVC 打开 file 跨域', !/allowFileAccessFromFileURLs/.test(vc));
 
+/* 10.5 壳源文件完整性（新加的 .m/.h 必须登记进 project.yml，否则 CI 会漏编） */
+const shellDir = path.join(ROOT, 'ios-shell/TrollLifeApp');
+const shellSrc = fs.readdirSync(shellDir).filter((f) => /\.(m|h)$/.test(f));
+const projYml = fs.readFileSync(path.join(shellDir, 'project.yml'), 'utf8');
+const notListed = shellSrc.filter((f) => projYml.indexOf('- path: ' + f) === -1);
+check('壳源文件全部登记进 project.yml', notListed.length === 0,
+  '共 ' + shellSrc.length + ' 个，未登记: ' + (notListed.join(', ') || '无'));
+
+/* 10.6 ObjC 源码括号/花括号配对（粗查截断或漏写） */
+const objcBad = [];
+shellSrc.forEach((f) => {
+  const src = fs.readFileSync(path.join(shellDir, f), 'utf8');
+  const cleaned = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/[^\n]*$/gm, '')
+    .replace(/@?"(?:[^"\\\n]|\\.)*"/g, '""');
+  [['{', '}'], ['(', ')'], ['[', ']']].forEach(([o, c]) => {
+    const a = (cleaned.split(o).length - 1);
+    const b = (cleaned.split(c).length - 1);
+    if (a !== b) { objcBad.push(f + ' ' + o + c + '=' + a + '/' + b); }
+  });
+});
+check('ObjC 源文件括号配对', objcBad.length === 0, objcBad.join(' | '));
+
+/* 10.7 崩溃日志与自诊断能力（本次新增，专门用来定位闪退） */
+check('崩溃日志落盘到 Documents（文件 App 可见）',
+  /NSDocumentDirectory/.test(fs.readFileSync(path.join(shellDir, 'TLDiagnostics.m'), 'utf8')) &&
+  /UIFileSharingEnabled/.test(fs.readFileSync(path.join(shellDir, 'Info.plist'), 'utf8')));
+check('未捕获异常 + 信号处理器齐全',
+  /NSSetUncaughtExceptionHandler/.test(fs.readFileSync(path.join(shellDir, 'TLDiagnostics.m'), 'utf8')) &&
+  /SIGSEGV/.test(fs.readFileSync(path.join(shellDir, 'TLDiagnostics.m'), 'utf8')) &&
+  /backtrace_symbols_fd/.test(fs.readFileSync(path.join(shellDir, 'TLDiagnostics.m'), 'utf8')));
+check('启动面包屑（可反推 dyld 级崩溃）',
+  /TLMarkLaunchStart/.test(fs.readFileSync(path.join(shellDir, 'main.m'), 'utf8')) &&
+  /tl_last_ready/.test(fs.readFileSync(path.join(shellDir, 'TLDiagnostics.m'), 'utf8')));
+check('安全模式（连续启动失败则跳过 WKWebView）',
+  /TLIsSafeMode/.test(vc) && /fails >= 2/.test(fs.readFileSync(path.join(shellDir, 'TLDiagnostics.m'), 'utf8')));
+check('白屏检测（加载完成后再查 DOM 长度）', /页面 DOM 长度/.test(vc));
+
 /* 11. 工作流避坑点 */
 const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/build-ipa.yml'), 'utf8');
 check('CI 使用 macos-15', /runs-on:\s*macos-15/.test(wf));

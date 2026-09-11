@@ -4,16 +4,21 @@
 //
 //  壳的职责只有三件事：
 //   1) 把本地 index.html 加载进 WKWebView；
-//   2) 提供 nativeFetch 原生取数通道（解决 file:// 页面被 CORS 拦住的问题）；
-//   3) 处理崩溃/白屏兜底。
+//   2) 提供 nativeFetch / nativeHttp 原生取数通道（解决 file:// 页面的 CORS 问题）；
+//   3) 崩溃/白屏兜底 + 自诊断。
 //  业务逻辑 100% 在 index.html 里，这里一行业务都不写。
+//
+//  为了定位「打开闪退」，这里每个关键步骤都会写一条面包屑（TLMarkStage）：
+//  崩溃后下次启动就能看到它停在哪个阶段，从而精确定位。
 //
 
 #import "ViewController.h"
-#import "AppDelegate.h"
+#import "TLDiagnostics.h"
 
 @interface ViewController ()
 @property (nonatomic, assign) BOOL didLoadPage;
+@property (nonatomic, strong) UIButton *diagButton;
+@property (nonatomic, strong) UILabel *statusLabel;
 @end
 
 @implementation ViewController
@@ -22,55 +27,29 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    TLMarkStage(@"ViewController.viewDidLoad 进入");
 
-    self.view.backgroundColor = [UIColor colorWithRed:0.051 green:0.059 blue:0.071 alpha:1.0]; /* #0D0F12 */
+    self.view.backgroundColor = [UIColor colorWithRed:0.051 green:0.059 blue:0.071 alpha:1.0];
 
-    WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
-    config.allowsInlineMediaPlayback = YES;
-    if (@available(iOS 10.0, *)) {
-        config.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
-    }
-    /* 原生取数通道：
-       - nativeFetch：简单 GET（window.webkit.messageHandlers.nativeFetch.postMessage({url,timeout})）
-       - nativeHttp ：支持 GET/POST + 自定义请求头 + 请求体，供页面调用外部 API（绕开 file:// 的 CORS）
-       壳只做传输，不解析、不判断业务。 */
-    [config.userContentController addScriptMessageHandler:self name:@"nativeFetch"];
-    [config.userContentController addScriptMessageHandler:self name:@"nativeHttp"];
-    /* 注意：绝对不要用私有 KVC 给 WKPreferences 设 allowFileAccessFromFileURLs，不同 iOS 会抛异常闪退 */
-
-    CGRect frame = self.view.bounds;
-    self.webView = [[WKWebView alloc] initWithFrame:frame configuration:config];
-    self.webView.navigationDelegate = self;
-    self.webView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.webView.backgroundColor = self.view.backgroundColor;
-    self.webView.opaque = NO;
-    self.webView.allowsBackForwardNavigationGestures = NO;
-
-    /* 安全区 / 缩放铁律 */
-    if (@available(iOS 11.0, *)) {
-        self.webView.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
-    }
-    self.webView.scrollView.pinchGestureRecognizer.enabled = NO;      /* 禁掉双指缩放 */
-    self.webView.scrollView.maximumZoomScale = 1.0;
-    self.webView.scrollView.minimumZoomScale = 1.0;
-    self.webView.scrollView.bounces = YES;
-    self.webView.scrollView.alwaysBounceVertical = YES;
-    self.webView.scrollView.showsHorizontalScrollIndicator = NO;
-
-    [self.view addSubview:self.webView];
-
-    /* 长按/双击缩放也一并关掉 */
-    for (UIGestureRecognizer *g in self.webView.scrollView.gestureRecognizers) {
-        if ([g isKindOfClass:[UIPinchGestureRecognizer class]]) { g.enabled = NO; }
-    }
-    for (UIGestureRecognizer *g in self.webView.gestureRecognizers) {
-        if ([g isKindOfClass:[UITapGestureRecognizer class]]) {
-            UITapGestureRecognizer *tap = (UITapGestureRecognizer *)g;
-            if (tap.numberOfTapsRequired == 2) { g.enabled = NO; }
-        }
+    /* 连续启动失败 → 安全模式：完全不碰 WebKit，先让用户看到诊断信息 */
+    if (TLIsSafeMode()) {
+        TLMarkStage(@"安全模式：跳过 WKWebView，显示诊断页");
+        [self installDiagnosticScreenAsRoot];
+        return;
     }
 
-    [self loadLocalIndexHTML];
+    @try {
+        [self setupWebView];
+    } @catch (NSException *e) {
+        TLLog(@"‼️ 创建 WKWebView 抛异常: %@ / %@", e.name, e.reason);
+        TLMarkStage(@"WKWebView 创建异常，转入诊断页");
+        [self installDiagnosticScreenAsRoot];
+    }
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    TLMarkStage(@"ViewController 已显示");
 }
 
 - (void)dealloc {
@@ -81,12 +60,143 @@
     } @catch (NSException *e) { }
 }
 
+#pragma mark - WKWebView 搭建（每一步都留面包屑）
+
+- (void)setupWebView {
+    TLMarkStage(@"WKWebView 搭建开始");
+
+    WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+    TLMarkStage(@"WKWebViewConfiguration 创建完成");
+
+    config.allowsInlineMediaPlayback = YES;
+    if (@available(iOS 10.0, *)) {
+        config.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
+    }
+
+    /* 原生通道：nativeFetch（GET）与 nativeHttp（POST，供 AI 接口用）。
+       注意：绝不用私有 KVC 设置 allowFileAccessFromFileURLs，某些 iOS 会直接抛异常闪退。 */
+    @try {
+        [config.userContentController addScriptMessageHandler:self name:@"nativeFetch"];
+        [config.userContentController addScriptMessageHandler:self name:@"nativeHttp"];
+        TLMarkStage(@"原生通道 nativeFetch/nativeHttp 注册完成");
+    } @catch (NSException *e) {
+        TLLog(@"‼️ 注册原生通道失败（不致命，继续）: %@", e.reason);
+    }
+
+    CGRect frame = self.view.bounds;
+    self.webView = [[WKWebView alloc] initWithFrame:frame configuration:config];
+    TLMarkStage(@"WKWebView 实例创建完成");
+
+    self.webView.navigationDelegate = self;
+    self.webView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.webView.backgroundColor = self.view.backgroundColor;
+    self.webView.opaque = NO;
+    self.webView.allowsBackForwardNavigationGestures = NO;
+
+    /* 安全区与缩放铁律 */
+    @try {
+        if (@available(iOS 11.0, *)) {
+            self.webView.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+        }
+        self.webView.scrollView.pinchGestureRecognizer.enabled = NO;
+        self.webView.scrollView.maximumZoomScale = 1.0;
+        self.webView.scrollView.minimumZoomScale = 1.0;
+        self.webView.scrollView.showsHorizontalScrollIndicator = NO;
+        TLMarkStage(@"scrollView 缩放与安全区设置完成");
+    } @catch (NSException *e) {
+        TLLog(@"‼️ 设置 scrollView 属性失败（不致命）: %@", e.reason);
+    }
+
+    [self.view addSubview:self.webView];
+    TLMarkStage(@"WKWebView 已加入视图层级");
+
+    [self installDiagButton];
+    [self loadLocalIndexHTML];
+}
+
+/* 右上角常驻「诊断」小按钮：页面白屏/异常时也能随时看到日志 */
+- (void)installDiagButton {
+    @try {
+        self.diagButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        [self.diagButton setTitle:@"诊断" forState:UIControlStateNormal];
+        self.diagButton.titleLabel.font = [UIFont systemFontOfSize:11];
+        [self.diagButton setTitleColor:[UIColor colorWithWhite:0.75 alpha:0.9] forState:UIControlStateNormal];
+        self.diagButton.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.55];
+        self.diagButton.layer.cornerRadius = 10;
+        self.diagButton.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.diagButton addTarget:self action:@selector(showDiagnostics) forControlEvents:UIControlEventTouchUpInside];
+        [self.view addSubview:self.diagButton];
+
+        UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+        [NSLayoutConstraint activateConstraints:@[
+            [self.diagButton.widthAnchor constraintEqualToConstant:46],
+            [self.diagButton.heightAnchor constraintEqualToConstant:22],
+            [self.diagButton.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-6],
+            [self.diagButton.topAnchor constraintEqualToAnchor:safe.topAnchor constant:2]
+        ]];
+    } @catch (NSException *e) {
+        TLLog(@"‼️ 创建诊断按钮失败（不致命）: %@", e.reason);
+    }
+}
+
+- (void)showDiagnostics {
+    @try {
+        TLDiagnosticViewController *vc = [TLDiagnosticViewController make];
+        __weak typeof(self) weakSelf = self;
+        vc.onRetryWebView = ^{
+            [weakSelf dismissViewControllerAnimated:YES completion:^{
+                TLSetSafeMode(NO);
+                [weakSelf retryWebView];
+            }];
+        };
+        [self presentViewController:vc animated:YES completion:nil];
+    } @catch (NSException *e) {
+        TLLog(@"‼️ 打开诊断页失败: %@", e.reason);
+    }
+}
+
+/* 重试：把 WebView 拆掉重建（安全模式下的「重试打开网页」走这里） */
+- (void)retryWebView {
+    TLMarkStage(@"用户要求重试加载网页");
+    @try {
+        [self.webView removeFromSuperview];
+        self.webView = nil;
+        for (UIView *v in self.view.subviews) { [v removeFromSuperview]; }
+        [self setupWebView];
+    } @catch (NSException *e) {
+        TLLog(@"‼️ 重试失败: %@", e.reason);
+        [self installDiagnosticScreenAsRoot];
+    }
+}
+
+/* 诊断页作为根视图（安全模式 / WebView 建不出来时） */
+- (void)installDiagnosticScreenAsRoot {
+    @try {
+        for (UIView *v in self.view.subviews) { [v removeFromSuperview]; }
+        TLDiagnosticViewController *vc = [TLDiagnosticViewController make];
+        __weak typeof(self) weakSelf = self;
+        vc.onRetryWebView = ^{
+            TLSetSafeMode(NO);
+            [weakSelf retryWebView];
+        };
+        [self addChildViewController:vc];
+        vc.view.frame = self.view.bounds;
+        vc.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [self.view addSubview:vc.view];
+        [vc didMoveToParentViewController:self];
+        TLMarkStage(@"诊断页已挂载为根视图");
+    } @catch (NSException *e) {
+        TLLog(@"‼️ 挂载诊断页失败: %@", e.reason);
+    }
+}
+
 #pragma mark - 加载本地页面（多候选路径）
 
 - (void)loadLocalIndexHTML {
+    TLMarkStage(@"开始查找 index.html");
     NSMutableArray *candidates = [NSMutableArray array];
-    [candidates addObject:[[NSBundle mainBundle] pathForResource:@"index" ofType:@"html"]];           /* .app/index.html */
-    [candidates addObject:[[NSBundle mainBundle] pathForResource:@"index" ofType:@"html" inDirectory:@"www"]]; /* .app/www/index.html */
+    [candidates addObject:[[NSBundle mainBundle] pathForResource:@"index" ofType:@"html"]];
+    [candidates addObject:[[NSBundle mainBundle] pathForResource:@"index" ofType:@"html" inDirectory:@"www"]];
     [candidates addObject:[[NSBundle mainBundle] pathForResource:@"index" ofType:@"html" inDirectory:@"Resources"]];
 
     NSString *path = nil;
@@ -95,45 +205,84 @@
     }
 
     if (path.length == 0) {
-        [AppDelegate appendCrashLog:@"致命错误：bundle 里找不到 index.html"];
-        [self.webView loadHTMLString:
-         @"<html><body style='background:#0D0F12;color:#D8DEE9;font-family:-apple-system;padding:24px'>"
-         @"<h2>缺少 index.html</h2><p>打包时没有把 index.html 拷进 .app，请检查构建流程。</p></body></html>"
-                            baseURL:nil];
+        TLLog(@"‼️ bundle 里找不到 index.html");
+        TLMarkStage(@"找不到 index.html（白屏）");
+        [self showFatalMessage:@"缺少 index.html：打包时没有把页面拷进 .app，请检查构建流程。"];
         return;
     }
 
-    NSURL *fileURL = [NSURL fileURLWithPath:path];
-    NSURL *dirURL = [fileURL URLByDeletingLastPathComponent];
-    [AppDelegate appendCrashLog:[NSString stringWithFormat:@"加载页面: %@", path]];
-    [self.webView loadFileURL:fileURL allowingReadAccessToURL:dirURL];
-    self.didLoadPage = YES;
+    NSDictionary *attr = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+    TLLog(@"找到页面: %@ (%llu 字节)", path, [attr fileSize]);
+
+    @try {
+        NSURL *fileURL = [NSURL fileURLWithPath:path];
+        NSURL *dirURL = [fileURL URLByDeletingLastPathComponent];
+        TLMarkStage(@"调用 loadFileURL 加载页面");
+        [self.webView loadFileURL:fileURL allowingReadAccessToURL:dirURL];
+        self.didLoadPage = YES;
+    } @catch (NSException *e) {
+        TLLog(@"‼️ loadFileURL 抛异常: %@", e.reason);
+        TLMarkStage(@"loadFileURL 异常");
+        [self showFatalMessage:[NSString stringWithFormat:@"加载页面失败：%@", e.reason]];
+    }
+}
+
+- (void)showFatalMessage:(NSString *)msg {
+    @try {
+        [self.webView loadHTMLString:[NSString stringWithFormat:
+            @"<html><body style='background:#0D0F12;color:#D8DEE9;font-family:-apple-system;padding:24px'>"
+            @"<h2>无法打开页面</h2><p>%@</p><p style='color:#8899a6;font-size:13px'>右上角「诊断」按钮里可以看到完整日志。</p>"
+            @"</body></html>", msg]
+                            baseURL:nil];
+    } @catch (NSException *e) { }
 }
 
 #pragma mark - WKNavigationDelegate
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
-    [AppDelegate appendCrashLog:@"页面加载完成"];
-    /* 页面里没有业务需要的原生调用，这里不注入任何东西 */
+    TLMarkStage(@"页面加载完成 didFinishNavigation");
+
+    /* 白屏检测：页面 DOM 是否真的有内容 */
+    @try {
+        [webView evaluateJavaScript:@"(function(){try{return (document.body&&document.body.innerHTML.length)||0;}catch(e){return -1;}})()"
+                  completionHandler:^(id result, NSError *error) {
+            if (error) {
+                TLLog(@"页面脚本自检失败: %@", error.localizedDescription);
+                return;
+            }
+            NSInteger len = [result respondsToSelector:@selector(integerValue)] ? [result integerValue] : -1;
+            TLLog(@"页面 DOM 长度 = %ld", (long)len);
+            if (len <= 0) {
+                TLLog(@"⚠️ 页面渲染为空（白屏），请检查 index.html 是否被正确拷贝、以及 JS 是否报错");
+                TLMarkStage(@"页面白屏：DOM 为空");
+            } else {
+                TLMarkReady();   /* 到这里说明启动链路完全正常 */
+            }
+        }];
+    } @catch (NSException *e) {
+        TLLog(@"白屏检测异常: %@", e.reason);
+    }
 }
 
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
-    [AppDelegate appendCrashLog:[NSString stringWithFormat:@"页面加载失败: %@", error.localizedDescription]];
+    TLLog(@"‼️ 页面加载失败: %@ (%ld)", error.localizedDescription, (long)error.code);
+    TLMarkStage([NSString stringWithFormat:@"页面加载失败 %ld", (long)error.code]);
 }
 
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
-    [AppDelegate appendCrashLog:[NSString stringWithFormat:@"页面预加载失败: %@", error.localizedDescription]];
+    TLLog(@"‼️ 页面预加载失败: %@ (%ld)", error.localizedDescription, (long)error.code);
+    TLMarkStage([NSString stringWithFormat:@"页面预加载失败 %ld", (long)error.code]);
 }
 
 /* WebContent 进程被杀（内存不足）时自动重载，避免长时间白屏 */
 - (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {
-    [AppDelegate appendCrashLog:@"WebContent 进程被终止，重新加载页面"];
+    TLLog(@"⚠️ WebContent 进程被终止，重新加载页面");
+    TLMarkStage(@"WebContent 进程被终止");
     [webView reload];
 }
 
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     NSURL *url = navigationAction.request.URL;
-    /* 只允许本地 file:// 与 about:blank，外链交给系统浏览器 */
     if (url == nil || [url.scheme isEqualToString:@"file"] || [url.scheme isEqualToString:@"about"]) {
         decisionHandler(WKNavigationActionPolicyAllow);
         return;
@@ -167,12 +316,10 @@
     } else if ([message.body isKindOfClass:[NSString class]]) {
         urlString = (NSString *)message.body;
     }
-
     if (urlString.length == 0) {
         [self callbackToJS:nil text:nil error:@"empty url"];
         return;
     }
-
     NSURL *url = [NSURL URLWithString:urlString];
     if (url == nil) {
         [self callbackToJS:nil text:nil error:@"bad url"];
@@ -284,7 +431,7 @@
     [self.webView evaluateJavaScript:js completionHandler:nil];
 }
 
-/* 把结果回传给页面：页面里定义了 window.__nativeResult(err, text) */
+/* 回传给页面：页面里定义了 window.__nativeResult(err, text) */
 - (void)callbackToJS:(id)req text:(NSString *)text error:(NSString *)error {
     NSString *js = nil;
     if (error.length > 0) {

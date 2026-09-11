@@ -10,4 +10,6 @@
 
 @property (strong, nonatomic) WKWebView *webView;
 
+- (void)loadLocalIndexHTML;
+
 @end

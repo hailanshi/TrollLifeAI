@@ -34,6 +34,8 @@ targets:
       - path: AppDelegate.m
       - path: ViewController.h
       - path: ViewController.m
+      - path: TLDiagnostics.h
+      - path: TLDiagnostics.m
       # index.html 与两张图标随 bundle 一起打包（构建脚本还会再手动拷一份做双保险）
       # 1024 预览图不参与打包，避免包里多出无用资源
       - path: Resources

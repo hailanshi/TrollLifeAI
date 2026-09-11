@@ -9,7 +9,4 @@
 
 @property (strong, nonatomic) UIWindow *window;
 
-+ (void)installCrashHandlers;
-+ (void)appendCrashLog:(NSString *)text;
-
 @end
