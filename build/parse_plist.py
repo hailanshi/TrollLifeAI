@@ -1,4 +1,4 @@
-﻿import plistlib, zipfile, sys
+import plistlib, zipfile, sys
 z = zipfile.ZipFile(r"C:\Users\fanyo\Desktop\TrollLifeAI.ipa")
 d = plistlib.loads(z.read("Payload/TrollLifeApp.app/Info.plist"))
 keys = ["CFBundleIdentifier","CFBundleExecutable","CFBundleDisplayName","CFBundleName",

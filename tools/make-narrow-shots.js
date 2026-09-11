@@ -1,4 +1,4 @@
-﻿/**
+/**
  * make-narrow-shots.js —— 在 390px 宽的 iframe 里真实渲染 app.html
  * 用途：① 报告真实 iPhone 宽度下有没有横向溢出；② 截图真机尺寸下的各个界面。
  * 用法： node tools/make-narrow-shots.js   然后 powershell -File tools/shot.ps1

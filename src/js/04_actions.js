@@ -225,12 +225,13 @@
         if (TL.relCount('child') >= 3) { return '子女已经够多了'; }
         return s.attrs['财富'] >= 20000 ? '' : '现金不足 20000 元';
       },
-      run: function () {
+      run: function (s) {
+        var female = (s.gender === '女');
         return {
-          change: { '财富': -20000, '快乐': 8, '压力值': 12, '健康值': -3 },
+          change: { '财富': -20000, '快乐': 8, '压力值': 12, '健康值': female ? -5 : -1 },
           markers: '【关系:child:' + TL.genName() + '】',
-          log: '家里迎来一个新生命',
-          toast: '子女 +1，压力 +12'
+          log: female ? '经历怀孕与生产，家里迎来一个新生命' : '配偶顺利生产，你当上了爸爸',
+          toast: female ? '怀孕生子：子女 +1，健康 -5' : '孩子出生：子女 +1'
         };
       }
     },

@@ -1,13 +1,14 @@
-// 数据加载服务：从 assets/json 读取 5 份剧本数据。
+// 数据加载服务：从 assets/json 读取剧本数据（5 份剧本 + 1 份剧情规则表）。
 //
 // 全部读取都做了容错：某个文件缺失或 JSON 损坏时，
-// 该部分返回空列表并记录错误信息，而不是抛异常让 App 崩溃。
+// 该部分返回空列表 / 空规则并记录错误信息，而不是抛异常让 App 崩溃。
 
 import 'dart:convert';
 
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../models/achievement.dart';
+import '../models/age_rule.dart';
 import '../models/city_data.dart';
 import '../models/life_event.dart';
 import '../models/skill.dart';
@@ -30,6 +31,10 @@ class GameDataBundle {
   /// 事件表
   final List<LifeEvent> events;
 
+  /// 剧情逻辑规则表（年龄纠偏 + 前提校验），来自 assets/json/age_rules.json。
+  /// 资源缺失时为 AgeRuleSet.empty：不纠偏、不校验，游戏仍可正常进行。
+  final AgeRuleSet ageRules;
+
   /// 加载过程中的错误信息（界面可展示，便于排查资源问题）
   final List<String> errors;
 
@@ -39,6 +44,7 @@ class GameDataBundle {
     required this.skills,
     required this.cities,
     required this.events,
+    this.ageRules = AgeRuleSet.empty,
     this.errors = const <String>[],
   });
 
@@ -49,10 +55,14 @@ class GameDataBundle {
     skills: <Skill>[],
     cities: <CityData>[],
     events: <LifeEvent>[],
+    ageRules: AgeRuleSet.empty,
   );
 
   /// 数据是否已经加载完整
   bool get isReady => events.isNotEmpty && skills.isNotEmpty;
+
+  /// 规则表是否可用
+  bool get hasAgeRules => !ageRules.isEmpty;
 
   /// 按 skillId 建立索引，便于事件标记【习得:xxx】快速查表
   Map<String, Skill> get skillIndex {
@@ -124,14 +134,59 @@ class DataLoader {
       errors,
     );
 
+    // 剧情逻辑规则表：缺失 / 损坏时退回空规则（不纠偏、不校验），不影响其他数据
+    final AgeRuleSet ageRules = await _loadAgeRules(
+      '$assetDir/age_rules.json',
+      errors,
+    );
+
     return GameDataBundle(
       talents: talents,
       achievements: achievements,
       skills: skills,
       cities: cities,
       events: events,
+      ageRules: ageRules,
       errors: errors,
     );
+  }
+
+  /// 加载剧情逻辑规则表（age_rules.json）。
+  /// 文件不存在或格式异常时返回 [AgeRuleSet.empty] 并记录错误，绝不抛异常。
+  ///
+  /// 注意：源文件带 UTF-8 BOM（与网页版共用同一份），
+  /// 这里先剥掉 BOM 再交给 json.decode，避免部分 Dart 版本解析失败。
+  static Future<AgeRuleSet> _loadAgeRules(
+    String path,
+    List<String> errors,
+  ) async {
+    try {
+      final String raw = await rootBundle.loadString(path);
+      final String cleaned = _stripBom(raw);
+      final Object? decoded = json.decode(cleaned);
+      if (decoded is! Map) {
+        errors.add('$path 顶层不是对象，已忽略年龄/前提规则');
+        return AgeRuleSet.empty;
+      }
+      final AgeRuleSet rules =
+          AgeRuleSet.fromJson(Map<String, dynamic>.from(decoded));
+      if (rules.isEmpty) {
+        errors.add('$path 中没有可用的 ageRules / preconditions');
+      }
+      return rules;
+    } catch (e) {
+      errors.add('$path 读取失败（已退回空规则）：$e');
+      return AgeRuleSet.empty;
+    }
+  }
+
+  /// 去掉 UTF-8 BOM 头（\uFEFF），保证 json.decode 在任意版本都能解析
+  static String _stripBom(String text) {
+    if (text.isEmpty) return text;
+    if (text.codeUnitAt(0) == 0xFEFF) {
+      return text.substring(1);
+    }
+    return text;
   }
 
   /// 通用列表加载：读取资源 → JSON 解码 → 逐项映射，

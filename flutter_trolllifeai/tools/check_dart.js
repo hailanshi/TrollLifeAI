@@ -136,9 +136,10 @@ for (const file of files) {
 
   // ---- 可疑漏分号 ----
   lines.forEach((text, idx) => {
-    const t = text.trim();
+    // 先剥掉行尾注释，避免「语句; // 说明」被误判
+    const t = text.replace(/\/\/.*$/, '').trim();
     if (!t) return;
-    if (/^(\/\/|\/\*|\*)/.test(t)) return;
+    if (/^(\/\*|\*)/.test(t)) return;
     if (/[;{[(,:]$/.test(t)) return;
     if (/[}\]\)]$/.test(t)) return;
     if (/^(\}|\{|@|import|export|part|library)/.test(t)) return;

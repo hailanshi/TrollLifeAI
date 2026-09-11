@@ -1,4 +1,4 @@
-﻿const fs=require('fs'),path=require('path');
+const fs=require('fs'),path=require('path');
 const ROOT=process.cwd();
 const store={};
 global.window=global;

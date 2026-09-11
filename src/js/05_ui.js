@@ -22,6 +22,8 @@
   ui.startMode = 'new';        /* new | reincarnate */
   ui.achFilter = 'all';        /* all | got | locked */
   ui.busy = false;
+  ui.playerName = '';          /* 开局页输入的名字（渲染会重建 DOM，所以存在这里） */
+  ui.gender = '男';
   ui.currentEventIsAi = false; /* 当前弹窗里的事件是否由 AI 生成 */
   ui.aiState = null;           /* AI 请求进行中的状态（避免闭包丢参） */
   ui.saveTab = 0;
@@ -136,7 +138,12 @@
   }
   ui.syncLayout = syncLayout;
   function setTop(age, era) {
-    $('chipAge').innerHTML = age === null ? '年龄 --' : ('年龄 ' + age + ' 岁');
+    var S = TL.S;
+    if (age === null || !S) {
+      $('chipAge').innerHTML = '年龄 --';
+    } else {
+      $('chipAge').innerHTML = esc(S.name || '') + ' · ' + (S.gender || '') + ' · ' + age + '岁';
+    }
     $('chipEra').innerHTML = era ? ('年代 ' + TL.ERA_NAME[era]) : '年代 --';
   }
 
@@ -167,11 +174,27 @@
     var html = '';
     var reinc = ui.startMode === 'reincarnate';
     html += '<div class="card"><h3>' + (reinc ? '转世重生' : '人生重开') + '<span class="tail">TrollLifeAI</span></h3>' +
-      '<div class="muted">选择出生年代与城市，抽取天赋后开启这一世。' +
+      '<div class="muted">先决定「你是谁」，再选择出生年代与城市，抽取天赋后开启这一世。' +
       (reinc ? '上一世的少量属性已作为「前世余荫」继承。' : '') + '</div></div>';
 
+    /* 名字与性别 */
+    var nameVal = ui.playerName || '';
+    html += '<div class="card"><h3>① 你是谁</h3>' +
+      '<div class="nameRow">' +
+      '<input class="inp nameInp" id="playerNameInput" type="text" maxlength="8" ' +
+      'placeholder="给自己起个名字" value="' + esc(nameVal) + '" ' +
+      'oninput="window.ui.onNameInput(this.value)">' +
+      '<button class="btn sm nameDice" onclick="window.ui.randomName()">随机</button>' +
+      '</div>' +
+      '<div class="grid2" style="margin-top:8px">' +
+      '<button class="btn sm ' + (ui.gender === '男' ? 'primary' : '') + '" onclick="window.ui.setGender(\'男\')">♂ 男</button>' +
+      '<button class="btn sm ' + (ui.gender === '女' ? 'primary' : '') + '" onclick="window.ui.setGender(\'女\')">♀ 女</button>' +
+      '</div>' +
+      '<div class="tiny" style="margin-top:6px">性别会影响部分专属剧情（例如产假、彩礼、婆婆/岳父这类情节），也会改变剧情里的称谓。</div>' +
+      '</div>';
+
     /* 年代 */
-    html += '<div class="card"><h3>① 选择出生年代</h3><div class="grid3">';
+    html += '<div class="card"><h3>② 选择出生年代</h3><div class="grid3">';
     for (var i = 0; i < TL.ERAS.length; i++) {
       var e = TL.ERAS[i];
       html += '<button class="btn sm ' + (ui.startEra === e ? 'primary' : '') + '" onclick="window.ui.setEra(\'' + e + '\')">' + TL.ERA_NAME[e] + '</button>';
@@ -179,7 +202,7 @@
     html += '</div><div class="tiny">不同年代会解锁专属的公共大事件，影响机遇、薪资与社会环境。</div></div>';
 
     /* 城市 */
-    html += '<div class="card"><h3>② 选择出生城市</h3>';
+    html += '<div class="card"><h3>③ 选择出生城市</h3>';
     for (var c = 0; c < TL.DATA.city.length; c++) {
       var city = TL.DATA.city[c];
       var ok = !!city.eraFactor[ui.startEra];
@@ -194,7 +217,7 @@
     html += '</div>';
 
     /* 天赋 */
-    html += '<div class="card"><h3>③ 抽取天赋（3 选 1）<span class="tail">剩余重抽 ' + ui.rerollLeft + '</span></h3>';
+    html += '<div class="card"><h3>④ 抽取天赋（3 选 1）<span class="tail">剩余重抽 ' + ui.rerollLeft + '</span></h3>';
     if (!ui.drawnTalents.length) {
       html += '<button class="btn primary" onclick="window.ui.drawTalents()">抽取天赋</button>';
     } else {
@@ -243,8 +266,26 @@
     return parts.length ? parts.join('  ') : '无';
   }
 
-  ui.setEra = function (e) {
-    ui.startEra = e;
+  /* ---------------- 名字与性别 ---------------- */
+  ui.onNameInput = function (v) {
+    ui.playerName = String(v || '').slice(0, 8);
+  };
+  ui.setGender = function (g) {
+    var changed = (ui.gender !== g);
+    ui.gender = (g === '女') ? '女' : '男';
+    /* 名字还是上一个性别的默认名（或为空）时，自动换一个贴合的名字 */
+    if (changed && (!ui.playerName || TL.has(TL.NAME_POOL['男'], ui.playerName) || TL.has(TL.NAME_POOL['女'], ui.playerName))) {
+      ui.playerName = TL.randomName(ui.gender);
+    }
+    render();
+  };
+  ui.randomName = function () {
+    ui.playerName = TL.randomName(ui.gender);
+    window.toast('换了个名字：' + ui.playerName);
+    render();
+  };
+
+  ui.setEra = function (e) {    ui.startEra = e;
     /* 城市必须适配年代 */
     var cur = TL.cityByName(ui.startCity);
     if (!cur || !cur.eraFactor[e]) {
@@ -285,18 +326,19 @@
     try {
       if (ui.pickedTalent < 0) { window.toast('请先抽取并选择天赋'); return; }
       var talents = [ui.drawnTalents[ui.pickedTalent]];
+      var pname = ui.playerName || TL.randomName(ui.gender);
       if (ui.startMode === 'reincarnate') {
-        TL.reincarnate(ui.startEra, ui.startCity, talents);
+        TL.reincarnate(ui.startEra, ui.startCity, talents, pname, ui.gender);
       } else {
-        TL.S = TL.newState(ui.startEra, ui.startCity, talents);
-        TL.addLog('第 0 年：出生在【' + ui.startCity + '】，年代【' + TL.ERA_NAME[ui.startEra] + '】');
+        TL.S = TL.newState(ui.startEra, ui.startCity, talents, pname, ui.gender);
+        TL.addLog('第 0 年：' + pname + '（' + ui.gender + '）出生在【' + ui.startCity + '】，年代【' + TL.ERA_NAME[ui.startEra] + '】');
         TL.unlock('呱呱坠地');
       }
       TL.save();
       ui.startMode = 'new';
       ui.drawnTalents = []; ui.pickedTalent = -1; ui.rerollLeft = 3;
       ui.tab = 'home';
-      window.toast('人生开始！点击「过一年」推进剧情');
+      window.toast(pname + ' 的人生开始了！点击「过一年」推进剧情');
       render();
     } catch (e) { window.toast('开局失败：' + e.message); }
   };
@@ -319,8 +361,9 @@
 
     /* 状态与推进 */
     h += '<div class="card"><h3>人生进度<span class="tail">' + TL.ERA_NAME[S.era] + ' · ' + esc(S.cityName) + '</span></h3>' +
-      '<div class="row"><div><div class="big">' + S.age + ' 岁</div>' +
-      '<div class="tiny">预计寿命 ' + S.lifespan + ' 岁 · 职业：' + (S.job ? esc(S.job) : '无业') +
+      '<div class="row"><div><div class="big">' + esc(S.name || '') +
+      ' <span style="font-size:13px;color:#7fd1ae">' + (S.gender === '女' ? '♀' : '♂') + '</span></div>' +
+      '<div class="tiny">' + S.age + ' 岁 · 预计寿命 ' + S.lifespan + ' 岁 · 职业：' + (S.job ? esc(S.job) : '无业') +
       (S.salary ? '（月薪 ' + TL.fmt(S.salary) + '）' : '') + '</div></div>' +
       '<div class="tiny center">' + (S.prison > 0 ? ('服刑中 剩 ' + S.prison + ' 年') : '自由身') + '</div></div>' +
       (S.prison > 0 ? '<div class="tiny">服刑期间只能推进年份，出狱后案底会压低收入。</div>' : '') +
@@ -328,6 +371,7 @@
       '<button class="btn primary" onclick="window.ui.nextYear()">过一年（第 ' + (S.age + 1) + ' 岁）</button>' +
       '<div class="btnRow"><button class="btn sm" onclick="window.ui.fastForward()">快进 10 年</button>' +
       '<button class="btn sm ghost" onclick="window.ui.showLifeLog()">人生日志</button></div>' +
+      '<div class="tiny">快进会替你做抉择（自动挑综合最划算的选项），结束后给出这十年的总结。</div>' +
       '</div>';
 
     /* 主动行动（每岁 1 点行动力） */
@@ -421,7 +465,7 @@
     h += '<div class="card"><h3>最近人生经历</h3><div class="scrollBox">';
     if (!S.log.length) { h += '<div class="tiny">还没有经历</div>'; }
     for (var g = 0; g < Math.min(S.log.length, 12); g++) {
-      h += '<div class="logItem">' + esc(stripMarks(S.log[g])) + '</div>';
+      h += '<div class="logItem">' + esc(stripMarks(TL.fill(S.log[g]))) + '</div>';
     }
     h += '</div></div>';
 
@@ -507,23 +551,68 @@
       if (ui.busy) { return; }
       var S = TL.S; if (!S || !S.alive) { return; }
       ui.busy = true;
-      var years = 0;
-      while (years < 10) {
+
+      var startAge = S.age;
+      var before = {};
+      var k;
+      for (k = 0; k < TL.ATTRS.length; k++) { before[TL.ATTRS[k]] = S.attrs[TL.ATTRS[k]]; }
+
+      var done = 0, events = [], died = false;
+      while (done < 10) {
         var res = TL.advanceYear();
-        years += 1;
-        if (!S.alive) { break; }
-        if (res && (res.type === 'event')) {
-          ui.busy = false; TL.save();
-          window.toast('快进 ' + years + ' 年后遇到事件');
-          presentEvent(res.event); return;
+        done += 1;
+        /* 快进不等于跳过：事件的选项由引擎自动挑一个最划算的，并在总结里逐条列出 */
+        if (res && res.type === 'event' && res.event && res.event.choices && res.event.choices.length) {
+          var idx = TL.bestChoiceIndex(res.event);
+          events.push({
+            title: TL.fill(stripMarks(res.event.title), S),
+            choice: TL.fill(stripMarks(res.event.choices[idx].option_text), S)
+          });
+          TL.chooseOption(res.event, idx);
         }
+        if (!S.alive) { died = true; break; }
       }
-      ui.busy = false; TL.save();
+      ui.busy = false;
+      TL.save();
+
+      var deltas = [];
+      for (k = 0; k < TL.ATTRS.length; k++) {
+        var key = TL.ATTRS[k];
+        var d = S.attrs[key] - before[key];
+        if (d !== 0) { deltas.push({ k: key, v: d }); }
+      }
+      showFastReport(startAge, done, events, deltas);
+
       if (!S.alive) { ui.tab = 're'; render(); showDeath(); return; }
-      window.toast('快进 ' + years + ' 年，一切平安');
       render();
     } catch (e) { ui.busy = false; window.toast('快进失败：' + e.message); }
   };
+
+  /* 快进总结：把这十年发生的事列出来，让玩家知道"自动抉择"选了什么 */
+  function showFastReport(startAge, years, events, deltas) {
+    var S = TL.S;
+    var body = '<div class="center" style="padding:2px 0 8px 0">' +
+      '<div class="big">' + startAge + ' → ' + (S ? S.age : startAge + years) + ' 岁</div>' +
+      '<div class="muted">共推进 ' + years + ' 年 · 经历 ' + events.length + ' 件事</div></div>';
+    if (events.length) {
+      body += '<div class="sep"></div><div class="tiny">快进期间自动替你做的选择：</div><div class="scrollBox">';
+      for (var i = 0; i < events.length; i++) {
+        body += '<div class="logItem">' + (i + 1) + '. <b>' + esc(events[i].title) + '</b><br>' +
+          '<span class="tiny">→ ' + esc(events[i].choice) + '</span></div>';
+      }
+      body += '</div>';
+    }
+    body += '<div class="sep"></div><div class="tiny">这十年的属性净变化：</div><div class="attrWrap">';
+    if (!deltas.length) { body += '<span class="tiny">没有变化</span>'; }
+    for (var j = 0; j < deltas.length; j++) {
+      var d = deltas[j];
+      body += '<span class="delta ' + cls(d.v) + '">' + d.k + (d.v > 0 ? '+' : '') +
+        (d.k === '财富' ? TL.fmt(d.v) : d.v) + '</span>';
+    }
+    body += '</div>';
+    openModal('快进总结', '十年过去了', body,
+      '<button class="btn" onclick="window.ui.closeModal()">知道了</button>');
+  }
 
   /* 呈现事件：能走 AI 就先让 AI 续写，失败/超时/用户跳过则回退本地剧情 */
   function presentEvent(localEvent) {
@@ -591,16 +680,16 @@
     var ev = ui.currentEvent;
     if (!ev) { return; }
     var aiBadge = ui.currentEventIsAi ? '<span class="tagAi">AI 原创</span>' : '';
-    var body = aiBadge + eraTagOf(ev) + '<div class="story">' + esc(stripMarks(ev.story)) + '</div><div class="sep"></div>';
+    var body = aiBadge + eraTagOf(ev) + '<div class="story">' + esc(stripMarks(TL.fill(ev.story))) + '</div><div class="sep"></div>';
     for (var i = 0; i < ev.choices.length; i++) {
       body += '<div class="choice" onclick="window.ui.chooseEvent(' + i + ')">' +
-        '<div class="t">' + (i + 1) + '. ' + esc(stripMarks(ev.choices[i].option_text)) + '</div>' +
-        '<div class="d">' + esc(stripMarks(ev.choices[i].desc)) + '</div></div>';
+        '<div class="t">' + (i + 1) + '. ' + esc(stripMarks(TL.fill(ev.choices[i].option_text))) + '</div>' +
+        '<div class="d">' + esc(stripMarks(TL.fill(ev.choices[i].desc))) + '</div></div>';
     }
     var bonus = TL.skillBonus(ev.title + ' ' + ev.story);
     var sub = '第 ' + TL.S.age + ' 岁 · ' + TL.ERA_NAME[TL.S.era] + ' · ' + esc(TL.S.cityName) +
       (bonus > 0 ? (' · 技能加成 +' + Math.round(bonus * 100) + '%') : '');
-    openModal(esc(stripMarks(ev.title)), sub, body,
+    openModal(esc(stripMarks(TL.fill(ev.title))), sub, body,
       '<div class="tiny center">选择后属性自动结算，剧情不可逆</div>');
   }
 
@@ -625,7 +714,7 @@
     var S = TL.S; if (!S) { return; }
     var body = '';
     if (!S.log.length) { body = '<div class="tiny">还没有经历</div>'; }
-    for (var i = 0; i < S.log.length; i++) { body += '<div class="logItem">' + esc(stripMarks(S.log[i])) + '</div>'; }
+    for (var i = 0; i < S.log.length; i++) { body += '<div class="logItem">' + esc(stripMarks(TL.fill(S.log[i]))) + '</div>'; }
     openModal('人生日志', '共 ' + S.log.length + ' 条记录', body,
       '<button class="btn" onclick="window.ui.closeModal()">关闭</button>');
   };
@@ -732,7 +821,7 @@
     } else {
       h += '<div class="scrollBox">';
       for (var i = S.ai.cache.length - 1; i >= 0; i--) {
-        h += '<div class="logItem">✨ ' + esc(stripMarks(S.ai.cache[i].title)) + '</div>';
+        h += '<div class="logItem">✨ ' + esc(stripMarks(TL.fill(S.ai.cache[i].title))) + '</div>';
       }
       h += '</div>';
     }

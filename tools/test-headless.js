@@ -109,7 +109,8 @@ for (let i = 0; i < LIVES; i++) {
   const cityCandidates = data.city.filter((c) => c.eraFactor[era]);
   const city = cityCandidates[i % cityCandidates.length].cityName;
   const talent = data.talents[(i * 7) % data.talents.length];
-  TL.S = TL.newState(era, city, [talent]);
+  const gender = (i % 2 === 0) ? '男' : '女';                 /* 交替男女，覆盖性别专属剧情 */
+  TL.S = TL.newState(era, city, [talent], null, gender);
   TL.unlock('呱呱坠地');
   const before = unlockedNames().length;
   lives++;
@@ -523,6 +524,58 @@ ui.askResetAll();
 window.doConfirmOK();
 assert(TL.S === null, '确认「清空存档」后当前人生仍然存在');
 section('确认弹窗动作派发（放弃本世 / 结束本世 / 解锁成就 / 清空存档）');
+
+/* 7.9 名字与性别 */
+TL.resetAll();
+TL.S = TL.newState('90', '小县城', [data.talents[0]], '苏晚', '女');
+assert(TL.S.name === '苏晚', '名字未写入角色');
+assert(TL.S.gender === '女', '性别未写入角色');
+assert(TL.fill('{名字} 发现 {ta} 的包不见了，{ta的} {配偶} 在等她', TL.S) === '苏晚 发现 她 的包不见了，她的 丈夫 在等她',
+  '占位符替换结果不对：' + TL.fill('{名字} 发现 {ta} 的包不见了，{ta的} {配偶} 在等她', TL.S));
+TL.S = TL.newState('90', '小县城', [data.talents[0]], '陈默', '男');
+assert(TL.fill('{ta} 和 {配偶} 一起回家', TL.S) === '他 和 妻子 一起回家', '男性占位符替换不对');
+/* 随机名字要落在对应性别的名字池里 */
+for (let i = 0; i < 30; i++) {
+  assert(TL.has(TL.NAME_POOL['男'], TL.randomName('男')), '随机男名不在池里');
+  assert(TL.has(TL.NAME_POOL['女'], TL.randomName('女')), '随机女名不在池里');
+}
+/* 性别专属剧情必须真的按性别过滤 */
+const femaleEv = data.event.filter((e) => /产假|婆婆|孕期|产检/.test(e.title + e.story))[0];
+const maleEv = data.event.filter((e) => /岳父|岳母|彩礼|伴郎/.test(e.title + e.story))[0];
+assert(femaleEv && maleEv, '找不到性别专属事件');
+TL.S.gender = '男';
+assert(TL.genderReason(femaleEv, TL.S) !== '', '男性玩家仍会抽到女性专属剧情：' + femaleEv.title);
+assert(TL.genderReason(maleEv, TL.S) === '', '男性玩家抽不到男性专属剧情：' + maleEv.title);
+TL.S.gender = '女';
+assert(TL.genderReason(maleEv, TL.S) !== '', '女性玩家仍会抽到男性专属剧情：' + maleEv.title);
+assert(TL.genderReason(femaleEv, TL.S) === '', '女性玩家抽不到女性专属剧情：' + femaleEv.title);
+/* 不允许出现"男女双方都被挡死"的事件 */
+let doubleBlocked = 0;
+for (const e of data.event) {
+  TL.S.gender = '男'; const rm = TL.genderReason(e, TL.S);
+  TL.S.gender = '女'; const rf = TL.genderReason(e, TL.S);
+  if (rm && rf) { doubleBlocked++; console.error('  男女都被挡: ' + e.title); }
+}
+assert(doubleBlocked === 0, '有 ' + doubleBlocked + ' 条事件对男女双方都不可达');
+section('名字与性别（占位符替换 + 专属剧情过滤 + 可达性）');
+
+/* 7.10 快进 10 年必须真的推进 10 年 */
+TL.S = TL.newState('90', '小县城', [data.talents[0]], '陈默', '男');
+ui.tab = 'home'; ui.busy = false; ui.currentEvent = null;
+const fastStart = TL.S.age;
+ui.fastForward();
+const advanced = TL.S.age - fastStart;
+assert(TL.S.alive, '快进 10 年内角色意外死亡（换个断言）');
+assert(advanced === 10, '快进 10 年实际只推进了 ' + advanced + ' 年');
+const fastTitle = document.getElementById('mTitle').innerHTML;
+const fastSub = document.getElementById('mSub').innerHTML;
+const fastBody = document.getElementById('mBody').innerHTML;
+assert(fastTitle.indexOf('快进总结') !== -1, '快进结束后没有给出总结弹窗（标题=' + fastTitle + '）');
+assert(fastSub.indexOf('十年过去了') !== -1, '快进总结副标题不对：' + fastSub);
+assert(fastBody.indexOf('属性净变化') !== -1, '快进总结缺少属性净变化');
+assert(fastBody.indexOf('件事') !== -1, '快进总结缺少事件条数');
+ui.closeModal();
+section('快进 10 年（真实推进 ' + advanced + ' 年 + 自动抉择 + 十年总结）');
 
 console.log('======== 无头逻辑自检报告 ========');
 console.log('模拟人生局数        : ' + lives + '（死亡 ' + deaths + ' 局，含服刑 ' + prisonLives + ' 局）');

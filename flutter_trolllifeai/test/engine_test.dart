@@ -3,9 +3,12 @@
 // 运行：flutter test
 // 覆盖：模型序列化、属性上下限、标记解析、成就判定、事件引擎逐年推进。
 
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:trolllifeai/models/achievement.dart';
+import 'package:trolllifeai/models/age_rule.dart';
 import 'package:trolllifeai/models/asset_state.dart';
 import 'package:trolllifeai/models/character.dart';
 import 'package:trolllifeai/models/city_data.dart';
@@ -475,6 +478,295 @@ void main() {
       engine.applyMarkers(c, EventEngine.parseMarkers('【出狱】'));
       // 使用真实的成就表需要 assets，这里只验证不会抛异常
       expect(() => engine.checkAchievements(c, unlocked, 1), returnsNormally);
+    });
+  });
+
+  group('年龄纠偏与前提校验（age_rules.json）', () {
+    /// 构造一份与 assets/json/age_rules.json 结构一致的规则集
+    AgeRuleSet buildRules() {
+      return AgeRuleSet.fromJson(<String, dynamic>{
+        'ageRules': <dynamic>[
+          <String, dynamic>{
+            'id': 'exam',
+            'kw': '高考|中考|升学考试|志愿填报|复读|金榜题名',
+            'min': 14,
+            'max': 20,
+          },
+          <String, dynamic>{
+            'id': 'romance',
+            'kw': '早恋|情书|暗恋|初恋|表白|谈恋爱',
+            'min': 12,
+          },
+          <String, dynamic>{
+            'id': 'kindergarten',
+            'kw': '幼儿园|学前班|小红花',
+            'max': 8,
+          },
+        ],
+        'preconditions': <dynamic>[
+          <String, dynamic>{
+            'id': 'partner',
+            'kw': '离婚|冷战|分居|出轨|背叛|配偶|丈夫|妻子|老公|老婆',
+            'exclude': '结婚|婚礼|订婚|求婚|相亲|表白|找到对象|脱单',
+            'need': 'partner',
+            'reason': '目前没有伴侣',
+          },
+          <String, dynamic>{
+            'id': 'pet',
+            'kw': '宠物|毛孩子|猫砂|狗粮|遛狗|幼崽|它走了|毛茸茸',
+            'exclude': '领养|抱回|捡到|收养|带回家|想养|流浪小动物',
+            'need': 'pet',
+            'reason': '目前没有宠物',
+          },
+        ],
+      });
+    }
+
+    test('规则集解析：非法规则被丢弃', () {
+      final AgeRuleSet rules = AgeRuleSet.fromJson(<String, dynamic>{
+        'ageRules': <dynamic>[
+          <String, dynamic>{'id': 'ok', 'kw': 'x', 'min': 3},
+          <String, dynamic>{'id': '', 'kw': 'y', 'min': 3},
+          <String, dynamic>{'id': 'z', 'kw': '', 'min': 3},
+        ],
+        'preconditions': <dynamic>[
+          <String, dynamic>{'id': 'p', 'kw': 'x', 'need': 'pet'},
+          <String, dynamic>{'id': 'q', 'kw': 'x'},
+        ],
+      });
+      expect(rules.ageRules.length, 1);
+      expect(rules.preconditions.length, 1);
+    });
+
+    test('空规则集不纠偏、不校验（资源缺失时的兜底）', () {
+      const AgeRuleSet empty = AgeRuleSet.empty;
+      expect(empty.isEmpty, isTrue);
+      final List<int> range = empty.effectiveAgeRange(
+        declaredMin: 7,
+        declaredMax: 17,
+        text: '你萌生早恋想法',
+      );
+      expect(range, <int>[7, 17]);
+      expect(
+        empty.preconditionReason(
+          '你和配偶离婚了',
+          hasPartner: false,
+          hasChild: false,
+          hasAlivePet: false,
+          isConvict: false,
+          hasJob: false,
+        ),
+        '',
+      );
+    });
+
+    test('年龄纠偏：早恋 7-17 → 12-17，高考 7-17 → 14-17', () {
+      final AgeRuleSet rules = buildRules();
+      expect(
+        rules.effectiveAgeRange(
+          declaredMin: 7,
+          declaredMax: 17,
+          text: '你萌生早恋想法',
+        ),
+        <int>[12, 17],
+      );
+      expect(
+        rules.effectiveAgeRange(
+          declaredMin: 7,
+          declaredMax: 17,
+          text: '高考/中考压力暴涨',
+        ),
+        <int>[14, 17],
+      );
+    });
+
+    test('年龄纠偏：幼儿园类上界被压到 8，且原上界就是 8 时不放大', () {
+      final AgeRuleSet rules = buildRules();
+      expect(
+        rules.effectiveAgeRange(
+          declaredMin: 0,
+          declaredMax: 15,
+          text: '幼儿园里的小红花',
+        ),
+        <int>[0, 8],
+      );
+      expect(
+        rules.effectiveAgeRange(
+          declaredMin: 0,
+          declaredMax: 6,
+          text: '幼儿园里的小红花',
+        ),
+        <int>[0, 6],
+      );
+    });
+
+    test('规则冲突（lo > hi）时放弃纠偏，保留原区间', () {
+      final AgeRuleSet rules = buildRules();
+      // 同时命中 exam(min14,max20) 与 kindergarten(max8)：lo=14 > hi=8 → 放弃纠偏
+      final List<int> range = rules.effectiveAgeRange(
+        declaredMin: 5,
+        declaredMax: 30,
+        text: '幼儿园同学后来一起参加高考',
+      );
+      expect(range, <int>[5, 30]);
+    });
+
+    test('上界 100 视为「终身」，放宽到 110', () {
+      final AgeRuleSet rules = buildRules();
+      expect(
+        rules.effectiveAgeRange(
+          declaredMin: 18,
+          declaredMax: 100,
+          text: '你参与网络诈骗接单',
+        ),
+        <int>[18, 110],
+      );
+    });
+
+    test('前提校验：没伴侣时拦下离婚，但「结婚」类不被拦', () {
+      final AgeRuleSet rules = buildRules();
+      expect(
+        rules.preconditionReason(
+          '你和配偶长期冷战，最终决定离婚',
+          hasPartner: false,
+          hasChild: false,
+          hasAlivePet: false,
+          isConvict: false,
+          hasJob: false,
+        ),
+        isNotEmpty,
+      );
+      // exclude 命中「结婚」→ 跳过校验
+      expect(
+        rules.preconditionReason(
+          '你和恋人结婚了，办了婚礼',
+          hasPartner: false,
+          hasChild: false,
+          hasAlivePet: false,
+          isConvict: false,
+          hasJob: false,
+        ),
+        '',
+      );
+      // 有伴侣就允许
+      expect(
+        rules.preconditionReason(
+          '你和配偶长期冷战，最终决定离婚',
+          hasPartner: true,
+          hasChild: false,
+          hasAlivePet: false,
+          isConvict: false,
+          hasJob: false,
+        ),
+        '',
+      );
+    });
+
+    test('前提校验：没宠物时拦下宠物离世，「领养」类不被拦', () {
+      final AgeRuleSet rules = buildRules();
+      expect(
+        rules.preconditionReason(
+          '陪了你十年的宠物它走了',
+          hasPartner: false,
+          hasChild: false,
+          hasAlivePet: false,
+          isConvict: false,
+          hasJob: false,
+        ),
+        isNotEmpty,
+      );
+      expect(
+        rules.preconditionReason(
+          '你在路边领养了一只流浪小动物',
+          hasPartner: false,
+          hasChild: false,
+          hasAlivePet: false,
+          isConvict: false,
+          hasJob: false,
+        ),
+        '',
+      );
+    });
+
+    test('引擎把纠偏区间写回事件，matchAge 使用纠偏后的区间', () {
+      final EventEngine engine = EventEngine(
+        data: GameDataBundle.empty,
+        random: Random(7),
+      );
+      expect(engine.ageRules.isEmpty, isTrue);
+      final LifeEvent event = LifeEvent.fromJson(<String, dynamic>{
+        'age_range': <int>[7, 17],
+        'title': '你萌生早恋想法',
+        'story': '',
+        'choices': <dynamic>[
+          <String, dynamic>{
+            'option_text': '藏在心里',
+            'attr_change': <String, dynamic>{'智力': 1},
+            'desc': '你把这件事写进了日记。',
+          },
+        ],
+      });
+      // 未应用规则时按原始区间判断
+      expect(event.matchAge(9), isTrue);
+      // 写入纠偏区间后，9 岁不再命中
+      event.applyAgeRange(12, 17);
+      expect(event.matchAge(9), isFalse);
+      expect(event.matchAge(13), isTrue);
+      expect(event.ageRangeNarrowed, isTrue);
+      expect(event.matchDeclaredAge(9), isTrue);
+      expect(engine.effectiveAgeRange(event), <int>[12, 17]);
+    });
+
+    test('规则表生效时，早年不会抽到恋爱/高考类事件', () {
+      final AgeRuleSet rules = buildRules();
+      final List<LifeEvent> events = <LifeEvent>[
+        LifeEvent.fromJson(<String, dynamic>{
+          'age_range': <int>[7, 17],
+          'title': '你萌生早恋想法',
+          'story': '',
+          'choices': <dynamic>[
+            <String, dynamic>{'option_text': '继续', 'attr_change': <String, dynamic>{}},
+          ],
+        }),
+        LifeEvent.fromJson(<String, dynamic>{
+          'age_range': <int>[7, 17],
+          'title': '高考/中考压力暴涨',
+          'story': '',
+          'choices': <dynamic>[
+            <String, dynamic>{'option_text': '继续', 'attr_change': <String, dynamic>{}},
+          ],
+        }),
+        LifeEvent.fromJson(<String, dynamic>{
+          'age_range': <int>[0, 12],
+          'title': '和小伙伴在河边玩',
+          'story': '',
+          'choices': <dynamic>[
+            <String, dynamic>{'option_text': '继续', 'attr_change': <String, dynamic>{}},
+          ],
+        }),
+      ];
+      final GameDataBundle bundle = GameDataBundle(
+        talents: const <Talent>[],
+        achievements: const <Achievement>[],
+        skills: const <Skill>[],
+        cities: const <CityData>[],
+        events: events,
+        ageRules: rules,
+      );
+      final EventEngine engine = EventEngine(data: bundle, random: Random(1));
+      // 构造器已把纠偏区间写入每条事件
+      expect(events[0].effectiveMinAge, 12);
+      expect(events[1].effectiveMinAge, 14);
+      expect(events[2].effectiveMaxAge, 12);
+
+      final Character child = _makeCharacter();
+      child.age = 9;
+      final List<LifeEvent> picked = engine.pickEvents(child, maxCount: 2);
+      expect(picked.isNotEmpty, isTrue);
+      for (final LifeEvent e in picked) {
+        expect(e.title.contains('早恋'), isFalse);
+        expect(e.title.contains('高考'), isFalse);
+      }
     });
   });
 

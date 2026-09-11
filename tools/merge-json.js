@@ -71,17 +71,31 @@ Object.keys(originals).forEach((k) => {
 });
 
 /* ---------------- 2. 补丁数据 ---------------- */
+/* 自动收录 build/patches 下所有 events_*.json（e/f/g/h… 新写的剧情会自动并入），按文件名排序保证顺序稳定 */
+function readAllEventPatches() {
+  let files = [];
+  try {
+    files = fs.readdirSync(PATCH_DIR).filter((f) => /^events_.*\.json$/.test(f)).sort();
+  } catch (e) { }
+  const out = [];
+  const parts = [];
+  files.forEach((f) => {
+    const arr = readPatch(f);
+    if (Array.isArray(arr) && arr.length) {
+      parts.push(f + '(' + arr.length + ')');
+      out.push.apply(out, arr);
+    }
+  });
+  report.eventPatchFiles = parts;
+  return out;
+}
+
 const patches = {
   talents: readPatch('talents.patch.json'),
   achievements: readPatch('achievements.patch.json'),
   skills: readPatch('skills.patch.json'),
   city: readPatch('city.patch.json'),
-  event: [].concat(
-    readPatch('events_a.json'),
-    readPatch('events_b.json'),
-    readPatch('events_c.json'),
-    readPatch('events_d.json')
-  ),
+  event: readAllEventPatches(),
 };
 
 /* ---------------- 3. 校验：原有条目字段 ---------------- */
@@ -209,12 +223,16 @@ function effectiveRange(ev) {
   const a = ev.age_range[0], b = ev.age_range[1];
   let lo = a, hi = b;
   const text = eventFullText(ev);
+  const title = ev.title || '';
   AGE_RULES.forEach((r) => {
-    if (!r.kw || !new RegExp(r.kw).test(text)) { return; }
+    if (!r.kw) { return; }
+    const subject = (r.scope === 'title') ? title : text;   /* scope:title 只匹配标题 */
+    if (!new RegExp(r.kw).test(subject)) { return; }
     if (typeof r.min === 'number' && r.min > lo) { lo = r.min; }
     if (typeof r.max === 'number' && r.max < hi) { hi = r.max; }
   });
   if (lo > hi) { return [a, b]; }   /* 规则冲突 → 保留原区间 */
+  if (hi === 100) { hi = 110; }     /* 100 表示「终身」 */
   return [lo, hi];
 }
 normEvents.forEach((e) => {
@@ -293,6 +311,9 @@ Object.keys(report.files).forEach((k) => {
   console.log(`${k}.json  原始 ${f.original} 条 -> 合并后 ${f.merged === undefined ? '(未写出)' : f.merged} 条  (+${f.added === undefined ? '?' : f.added})`);
 });
 console.log('事件年龄分布:', JSON.stringify(report.eventAgeBuckets));
+if (report.eventPatchFiles) {
+  console.log('事件补丁来源:', report.eventPatchFiles.join(' + '));
+}
 if (ageAdjusted.length) {
   console.log('\n按规则纠偏年龄的新增事件（' + ageAdjusted.length + ' 条）：');
   ageAdjusted.forEach((a) => {

@@ -262,7 +262,72 @@ class EventEngine {
   };
 
   EventEngine({required this.data, Random? random})
-      : random = random ?? Random();
+      : random = random ?? Random() {
+    // 初始化时把规则表应用到全部事件上（年龄纠偏区间只算一次并缓存）
+    installAgeRules();
+  }
+
+  /// 规则表（来自 assets/json/age_rules.json，缺失时为空规则）
+  AgeRuleSet get ageRules => data.ageRules;
+
+  // -----------------------------------------------------------------------
+  // 剧情逻辑规则：年龄纠偏 + 前提校验
+  // -----------------------------------------------------------------------
+
+  /// 把规则表应用到全部事件，缓存每一条事件的「有效年龄区间」。
+  ///
+  /// 计算方式与网页版一致：
+  ///   lo = 声明 min 与各命中规则 min 的最大值
+  ///   hi = 声明 max 与各命中规则 max 的最小值
+  ///   lo > hi 时放弃纠偏（保留原区间）；hi == 100 视为「终身」放宽到 110。
+  void installAgeRules() {
+    for (final LifeEvent event in data.events) {
+      final List<int> range = ageRules.effectiveAgeRange(
+        declaredMin: event.minAge,
+        declaredMax: event.maxAge,
+        text: event.allText,
+      );
+      event.applyAgeRange(range[0], range[1]);
+    }
+  }
+
+  /// 年龄纠偏后的有效区间（对外暴露，便于界面 / 测试查看）
+  List<int> effectiveAgeRange(LifeEvent event) {
+    if (event.ageRuleApplied) {
+      return <int>[event.effectiveMinAge, event.effectiveMaxAge];
+    }
+    return ageRules.effectiveAgeRange(
+      declaredMin: event.minAge,
+      declaredMax: event.maxAge,
+      text: event.allText,
+    );
+  }
+
+  /// 前提校验：返回空串表示允许，否则返回不允许的原因。
+  ///
+  /// 判定依据（与网页版一致）：
+  ///   partner = 有配偶或恋人；child = 有子女；pet = 有存活宠物；
+  ///   convict = 正在服刑或留有案底；job = 有职业且收入大于 0。
+  String preconditionReason(LifeEvent event, Character c) {
+    if (ageRules.isEmpty) return '';
+    return ageRules.preconditionReason(
+      event.allText,
+      hasPartner: c.countRelation(RelationType.spouse) > 0 ||
+          c.countRelation(RelationType.lover) > 0,
+      hasChild: c.childCount > 0,
+      hasAlivePet: c.activePets.isNotEmpty,
+      isConvict: c.jailYearsLeft > 0 || c.hasCriminalRecord,
+      hasJob: hasIncome(c),
+    );
+  }
+
+  /// 是否有稳定收入：有职业且当年收入大于 0
+  bool hasIncome(Character c) {
+    if (c.retired) return false;
+    if (c.unemployed) return false;
+    if (!c.hasJob && c.career == '无') return false;
+    return _computeIncome(c, c.age) > 0;
+  }
 
   /// 清理本局事件记录（转世后调用）
   void resetFired() {
@@ -303,46 +368,82 @@ class EventEngine {
   // 事件筛选
   // -----------------------------------------------------------------------
 
-  /// 按年龄与年代筛选可用事件
+  /// 按年龄（纠偏后）与年代筛选可用事件（不含三级兜底，供预览用）
   List<LifeEvent> filterEvents(Character c) {
-    return data.events.where((LifeEvent e) {
-      if (e.forced) return false;
-      if (!e.matchAge(c.age)) return false;
-      if (!e.matchEra(c.era)) return false;
-      if (_firedKeys.contains(e.rawTitle)) return false;
-      return true;
-    }).toList();
+    return data.events
+        .where((LifeEvent e) =>
+            !e.forced && e.matchAge(c.age) && e.matchEra(c.era))
+        .toList();
   }
 
-  /// 抽取本年度的事件：优先年代限定事件，其次普通事件；
-  /// 年代限定事件每世只出现一次（用 rawTitle 去重）。
+  /// 抽取本年度的事件。
+  ///
+  /// 与网页版一致的三级兜底，保证任何情况下都抽得到事件、不会卡住：
+  ///   ① 纠偏年龄合规 + 年代匹配 + 前提满足
+  ///   ② 纠偏年龄合规 + 年代匹配（忽略前提）
+  ///   ③ 只要求原始年龄区间匹配（忽略年代与前提）
+  /// 池子内优先抽「没抽过」的事件，全都抽过时允许重复（同一年代不重复）。
   List<LifeEvent> pickEvents(Character c, {int maxCount = _Balance.maxEventsPerYear}) {
-    final List<LifeEvent> pool = filterEvents(c);
-    if (pool.isEmpty) return <LifeEvent>[];
+    final List<LifeEvent> pool1 = <LifeEvent>[]; // ① 最严格
+    final List<LifeEvent> pool2 = <LifeEvent>[]; // ② 只要求年龄 + 年代
+    final List<LifeEvent> pool3 = <LifeEvent>[]; // ③ 只要求原始年龄区间
 
-    final List<LifeEvent> eraLocked =
-        pool.where((LifeEvent e) => e.eraLimit.isNotEmpty).toList();
-    final List<LifeEvent> general =
-        pool.where((LifeEvent e) => e.eraLimit.isEmpty).toList();
-
-    final List<LifeEvent> picked = <LifeEvent>[];
-
-    // 年代事件：如果这个年代还有没看过的专属事件，每年给 1 条
-    if (eraLocked.isNotEmpty && !c.eraEventsSeen.contains(c.era)) {
-      final LifeEvent chosen = eraLocked[random.nextInt(eraLocked.length)];
-      picked.add(chosen);
-      _firedKeys.add(chosen.rawTitle);
-      c.eraEventsSeen.add(c.era);
+    for (final LifeEvent e in data.events) {
+      if (e.forced) continue;
+      if (!e.matchAge(c.age)) continue; // 年龄纠偏是硬约束
+      pool3.add(e);
+      if (!e.matchEra(c.era)) continue;
+      pool2.add(e);
+      if (preconditionReason(e, c).isNotEmpty) continue;
+      pool1.add(e);
     }
 
-    // 普通事件补齐
-    final List<LifeEvent> rest = List<LifeEvent>.from(general)
-      ..shuffle(random);
-    for (final LifeEvent e in rest) {
-      if (picked.length >= maxCount) break;
-      if (picked.any((LifeEvent p) => p.rawTitle == e.rawTitle)) continue;
-      picked.add(e);
-      _firedKeys.add(e.rawTitle);
+    // 逐级回退：① → ② → ③
+    List<LifeEvent> use = pool1.isNotEmpty
+        ? pool1
+        : (pool2.isNotEmpty ? pool2 : pool3);
+    if (use.isEmpty) return <LifeEvent>[];
+
+    final List<LifeEvent> picked = <LifeEvent>[];
+    final Set<String> pickedThisYear = <String>{};
+    // 每一轮都重新按优先级取池子，避免「重复事件」把「新事件」挤掉
+    for (int round = 0; round < maxCount; round++) {
+      final List<LifeEvent> tier1 = <LifeEvent>[];
+      final List<LifeEvent> tier2 = <LifeEvent>[];
+      final List<LifeEvent> tier3 = <LifeEvent>[];
+      for (final LifeEvent e in use) {
+        if (pickedThisYear.contains(e.rawTitle)) continue;
+        tier3.add(e);
+        if (!e.matchEra(c.era)) continue;
+        tier2.add(e);
+        if (preconditionReason(e, c).isNotEmpty) continue;
+        tier1.add(e);
+      }
+
+      List<LifeEvent> candidates = tier1.isNotEmpty
+          ? tier1
+          : (tier2.isNotEmpty ? tier2 : tier3);
+      if (candidates.isEmpty) break;
+      candidates = List<LifeEvent>.from(candidates)..shuffle(random);
+
+      // 优先没抽过的事件；都抽过时才允许重复
+      LifeEvent chosen = candidates.first;
+      for (final LifeEvent e in candidates) {
+        if (!_firedKeys.contains(e.rawTitle)) {
+          chosen = e;
+          break;
+        }
+      }
+
+      picked.add(chosen);
+      pickedThisYear.add(chosen.rawTitle);
+      _firedKeys.add(chosen.rawTitle);
+      if (chosen.eraLimit.isNotEmpty && !c.eraEventsSeen.contains(c.era)) {
+        c.eraEventsSeen.add(c.era);
+      }
+      // 后续轮次的回退池同步缩小，避免刚抽过的事件再次入选
+      use = use.where((LifeEvent e) => e.rawTitle != chosen.rawTitle).toList();
+      if (use.isEmpty) break;
     }
 
     // 清洗事件池：内存控制，避免长寿命局无限增长

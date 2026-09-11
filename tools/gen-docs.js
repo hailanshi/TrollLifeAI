@@ -26,12 +26,18 @@ const merged = {
   city: rd('assets/json/city.json'),
   event: rd('assets/json/event.json'),
 };
-const groups = [
-  { file: 'events_a.json', name: 'A 组 · 童年 / 少年成长', desc: '12 条童年（0-6 岁）+ 18 条少年（7-17 岁）：幼儿园、留守、校园友谊、网瘾、早恋、中考分流等' },
-  { file: 'events_b.json', name: 'B 组 · 人际关系 / 职业系统', desc: '14 条人际（同事、重逢、出轨、离婚、子女、父母离世、绝交、斗殴）+ 14 条职业（入职、升职、裁员、跳槽、创业融资、破产、转行）' },
-  { file: 'events_c.json', name: 'C 组 · 医疗 / 消费 / 成瘾', desc: '10 条医疗（手术、住院、遗传病、焦虑抑郁、ICU、糖尿病、骨折）+ 10 条消费（买房买车、奢侈品、理财暴雷、借钱不还）+ 8 条成瘾（烟酒网赌、戒断、戒瘾所）' },
-  { file: 'events_d.json', name: 'D 组 · 年代 / 犯罪牢狱 / 宠物 / 老年', desc: '16 条年代专属（80/90/00/10/20）+ 7 条犯罪牢狱（入狱、减刑、越狱念头、出狱、案底）+ 8 条宠物生命周期 + 3 条老年收尾' },
+const gro = [
+  { file: 'events_a.json', name: 'A 组 · 童年 / 少年成长' },
+  { file: 'events_b.json', name: 'B 组 · 人际关系 / 职业系统' },
+  { file: 'events_c.json', name: 'C 组 · 医疗 / 消费 / 成瘾' },
+  { file: 'events_d.json', name: 'D 组 · 年代 / 犯罪牢狱 / 宠物 / 老年' },
+  { file: 'events_e.json', name: 'E 组 · 老年阶段（60-110 岁）' },
+  { file: 'events_f.json', name: 'F 组 · 童年与小学（0-12 岁）' },
+  { file: 'events_g.json', name: 'G 组 · 中学与青年（13-30 岁）' },
+  { file: 'events_h.json', name: 'H 组 · 中年阶段（31-59 岁）' },
+  { file: 'events_i.json', name: 'I 组 · 性别专属剧情（男向 / 女向）' }
 ];
+const groups = gro.filter((g) => fs.existsSync(path.join(ROOT, 'build', 'patches', g.file)));
 
 function markersOf(text) {
   const out = [];
@@ -42,7 +48,7 @@ function markersOf(text) {
 }
 
 /* ---------- 1. 新增事件清单 ---------- */
-let md = '# TrollLifeAI · 新增事件总清单（120 条）\n\n';
+let md = '# TrollLifeAI · 新增事件总清单\n\n';
 md += '> 本文件由 `tools/gen-docs.js` 从 `build/patches/events_*.json` 自动生成。\n';
 md += '> 所有新增事件都追加在原始 `event.json` 的 35 条之后，字段结构完全一致：\n';
 md += '> `age_range` / `title` / `story` / `choices[{option_text, attr_change(11 项), desc}]`。\n';
@@ -50,7 +56,7 @@ md += '> `desc` 末尾可能出现 `【…】` 剧情标记（属于文本内容
 
 groups.forEach((g, gi) => {
   const evs = rd('build/patches/' + g.file);
-  md += `## ${g.name}\n\n${g.desc}\n\n`;
+  md += `## ${g.name}\n\n`;
   md += `共 **${evs.length}** 条。\n\n`;
   evs.forEach((e, i) => {
     const idx = originals.event.length + groups.slice(0, gi).reduce((a, x) => a + rd('build/patches/' + x.file).length, 0) + i;

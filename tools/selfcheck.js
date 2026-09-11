@@ -183,11 +183,26 @@ check('事件池三级兜底（不会因为过滤没事件可抽）',
   /fallback1/.test(inlineJs) && /fallback2/.test(inlineJs) && /use = pool\.length/.test(inlineJs));
 check('确认弹窗支持命名空间动作（ui.xxx）',
   /function resolveAction/.test(inlineJs) && /resolveAction\(c\.fn\)/.test(inlineJs));
+
+/* 9.6 性别与名字 */
+check('开局可选名字（输入 + 随机）与性别',
+  /id="playerNameInput"/.test(app) && /ui\.setGender/.test(inlineJs) &&
+  /ui\.randomName/.test(inlineJs) && /oninput="window\.ui\.onNameInput/.test(app + inlineJs));
+check('剧情占位符替换（{名字}/{ta}/{ta的}/{配偶}）',
+  /TL\.fill\s*=\s*function/.test(inlineJs) && /\{名字\}/.test(inlineJs) && /\{配偶\}/.test(inlineJs));
+check('性别专属剧情过滤', /genderRules/.test(app) && /genderReason/.test(inlineJs));
+check('顶栏与主页显示名字与性别', /S\.name/.test(inlineJs) && /S\.gender/.test(inlineJs));
+check('AI 提示词带上名字与性别', /姓名：/.test(inlineJs) && /性别：/.test(inlineJs));
+
+/* 9.7 快进 10 年必须真的推进 10 年 */
+check('快进按 10 年循环推进（不再被事件打断）',
+  /while \(done < 10\)/.test(inlineJs) && /TL\.bestChoiceIndex/.test(inlineJs));
+check('快进结束给出十年总结', /快进总结/.test(inlineJs) && /showFastReport/.test(inlineJs));
+/* 兼容两种写法：stripMarks(x) 与 stripMarks(TL.fill(x)) */
+const stripOk = (needle) => new RegExp('stripMarks\\([^)]*' + needle).test(inlineJs);
 check('展示文本剥离剧情标记（剧情/选项/日志/标题）',
-  /stripMarks\(ev\.story\)/.test(inlineJs) &&
-  /stripMarks\(ev\.choices\[i\]\.desc\)/.test(inlineJs) &&
-  /stripMarks\(ev\.title\)/.test(inlineJs) &&
-  /stripMarks\(S\.log\[/.test(inlineJs));
+  stripOk('ev\\.story') && stripOk('ev\\.choices\\[i\\]\\.desc') &&
+  stripOk('ev\\.title') && stripOk('S\\.log\\['));
 
 /* 9. 壳工程与流水线文件齐全 */
 const required = [

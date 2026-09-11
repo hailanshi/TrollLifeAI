@@ -30,6 +30,49 @@
   };
   TL.has = function (arr, v) { return arr && arr.indexOf(v) !== -1; };
 
+  /* ---------------- 名字与性别 ---------------- */
+  TL.NAME_POOL = {
+    '男': ['陈默', '李昊', '王磊', '张一鸣', '刘洋', '赵启明', '周正', '孙浩', '吴越', '郑凯',
+      '林岸', '徐骁', '何锋', '马腾', '高远', '罗毅', '梁舟', '宋砚', '唐野', '许知'],
+    '女': ['苏晚', '林静', '陈曦', '李雨薇', '王雅', '张念', '刘诗', '赵晴', '周茉', '孙悦',
+      '吴桐', '郑夕', '何雯', '马岚', '高琳', '罗夏', '梁音', '宋慈', '唐宁', '许禾']
+  };
+  TL.randomName = function (gender) {
+    var pool = TL.NAME_POOL[(gender === '女') ? '女' : '男'];
+    return TL.pick(pool);
+  };
+
+  /* 文本占位符替换：{名字} {ta} {ta的} {配偶}
+     剧情数据里可以用这些占位符，渲染时按玩家选择的性别与名字替换。 */
+  TL.fill = function (text, s) {
+    if (!text || typeof text !== 'string') { return text; }
+    var st = s || TL.S;
+    if (!st) { return text; }
+    if (text.indexOf('{') === -1) { return text; }
+    var female = (st.gender === '女');
+    var name = st.name || (female ? '她' : '他');
+    return text
+      .replace(/\{名字\}/g, name)
+      .replace(/\{ta的\}/g, female ? '她的' : '他的')
+      .replace(/\{ta\}/g, female ? '她' : '他')
+      .replace(/\{配偶\}/g, female ? '丈夫' : '妻子');
+  };
+
+  /* 性别筛选：女性专属剧情不会出现在男性玩家身上，反之亦然 */
+  TL.genderReason = function (ev, s) {
+    if (!s || !s.gender) { return ''; }
+    var text = TL.eventText(ev);
+    var rules = TL.RULES.genderRules || [];
+    for (var i = 0; i < rules.length; i++) {
+      var r = rules[i];
+      if (!r.kw || !r.allow) { continue; }
+      if (!(new RegExp(r.kw).test(text))) { continue; }
+      if (r.exclude && new RegExp(r.exclude).test(text)) { continue; }
+      if (r.allow !== s.gender) { return '性别不匹配（' + (r.note || r.id) + '）'; }
+    }
+    return '';
+  };
+
   /* ---------------- 持久层（localStorage） ---------------- */
   TL.global = { achievements: [], lives: 0, bestAge: 0, inherit: { '智力': 0, '体质': 0, '魅力': 0 }, cheatsUsed: 0 };
 
@@ -54,10 +97,13 @@
 
   TL.S = null; /* 当前这一世的状态 */
 
-  TL.newState = function (era, cityName, talents) {
+  TL.newState = function (era, cityName, talents, playerName, gender) {
     var cityObj = TL.cityByName(cityName) || TL.DATA.city[0];
+    var g = (gender === '女') ? '女' : '男';
     var s = {
       age: 0, era: era, cityName: cityObj.cityName,
+      name: (playerName && String(playerName).trim()) ? String(playerName).trim().slice(0, 8) : TL.randomName(g),
+      gender: g,
       attrs: {}, assets: { house: 0, car: 0, luxury: 0, insurance: 0, debt: 0 },
       addictions: {}, relations: [], pets: [], skills: [], talents: talents || [],
       job: '', salary: 0, prison: 0, flags: { eraSeen: {} },
@@ -586,17 +632,20 @@
     return t;
   };
 
-  /* 年龄纠偏：按规则表收窄 age_range（只收窄，绝不放大；出现矛盾区间则放弃纠偏） */
+  /* 年龄纠偏：按规则表收窄 age_range（只收窄，绝不放大；出现矛盾区间则放弃纠偏）
+     规则可指定 scope:"title" —— 只匹配标题，避免剧情正文里顺带提到某个词就被误判年龄 */
   TL.effectiveAgeRange = function (ev) {
     var a = ev.age_range ? ev.age_range[0] : 0;
     var b = ev.age_range ? ev.age_range[1] : 110;
     var lo = a, hi = b;
-    var text = TL.eventText(ev);
+    var fullText = TL.eventText(ev);
+    var title = ev.title || '';
     var rules = TL.RULES.ageRules || [];
     for (var i = 0; i < rules.length; i++) {
       var r = rules[i];
       if (!r.kw) { continue; }
-      if (!(new RegExp(r.kw).test(text))) { continue; }
+      var subject = (r.scope === 'title') ? title : fullText;
+      if (!(new RegExp(r.kw).test(subject))) { continue; }
       if (typeof r.min === 'number' && r.min > lo) { lo = r.min; }
       if (typeof r.max === 'number' && r.max < hi) { hi = r.max; }
     }
@@ -671,6 +720,7 @@
       if (eraOk) { fallback1.push(ev); }
       if (!eraOk) { continue; }
       if (TL.preconditionReason(ev, s)) { continue; }
+      if (TL.genderReason(ev, s)) { continue; }
       pool.push(ev);
       if (!TL.has(s.usedTitles, ev.title)) { fresh.push(ev); }
     }
@@ -684,6 +734,30 @@
     s.usedTitles.push(ev2.title);
     if (s.usedTitles.length > 400) { s.usedTitles.shift(); }
     return ev2;
+  };
+
+  /* 选项评分：快进时自动抉择用（把「好属性」加、坏属性减，财富按 3000:1 折算） */
+  TL.choiceScore = function (change) {
+    var score = 0;
+    for (var i = 0; i < TL.ATTRS.length; i++) {
+      var k = TL.ATTRS[i];
+      var v = (change && change[k]) ? change[k] : 0;
+      if (v === 0) { continue; }
+      if (k === '财富') { score += v / 3000; }
+      else { score += (TL.GOOD_DIRECTION[k] === 1) ? v : -v; }
+    }
+    return score;
+  };
+
+  /* 自动挑一个"综合最划算"的选项（快进时替玩家决策，事后会在总结里列出来） */
+  TL.bestChoiceIndex = function (ev) {
+    if (!ev || !ev.choices || !ev.choices.length) { return 0; }
+    var best = 0, bestScore = -1e9;
+    for (var i = 0; i < ev.choices.length; i++) {
+      var sc = TL.choiceScore(ev.choices[i].attr_change || {});
+      if (sc > bestScore) { bestScore = sc; best = i; }
+    }
+    return best;
   };
 
   /* 哪些属性「越大越好」：成瘾值/压力值/罪恶值越大越糟 */
@@ -716,7 +790,7 @@
     if (lucky) { window.toast('技能加成生效（+' + Math.round(bonus * 100) + '%）：结果向有利方向偏移'); }
     TL.applyMarkers(ch.desc || '');
     TL.applyMarkers(ev.title || '');
-    TL.addLog('第 ' + s.age + ' 年：' + ev.title + ' → ' + ch.option_text + (lucky ? '（技能加成生效）' : ''));
+    TL.addLog('第 ' + s.age + ' 年：' + TL.fill(ev.title, s) + ' → ' + TL.fill(ch.option_text, s) + (lucky ? '（技能加成生效）' : ''));
     TL.checkAchievements();
     TL.checkDeath();
   };
@@ -764,8 +838,8 @@
     };
   };
 
-  TL.reincarnate = function (era, cityName, talents) {
-    TL.S = TL.newState(era, cityName, talents);
+  TL.reincarnate = function (era, cityName, talents, playerName, gender) {
+    TL.S = TL.newState(era, cityName, talents, playerName, gender);
     TL.global.lives += 1;
     TL.unlock('轮回新生');
     TL.addLog('第 0 年：转世新生，年代【' + TL.ERA_NAME[era] + '】，出生地【' + cityName + '】');
@@ -785,7 +859,14 @@
       var raw = localStorage.getItem(TL.SAVE_KEY);
       if (!raw) { return null; }
       var o = JSON.parse(raw);
-      if (o && o.attrs) { return o; }
+      if (o && o.attrs) {
+        /* 老存档没有名字/性别：补一个默认值，避免升级后显示异常 */
+        if (o.gender !== '女' && o.gender !== '男') { o.gender = '男'; }
+        if (!o.name) { o.name = TL.randomName(o.gender); }
+        if (o.actionPoints === undefined) { o.actionPoints = 1; }
+        if (!o.ai) { o.ai = { used: 0, fails: 0, cache: [] }; }
+        return o;
+      }
     } catch (e) { }
     return null;
   };

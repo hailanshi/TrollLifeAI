@@ -1,8 +1,10 @@
 // 剧情逻辑规则表：年龄纠偏（ageRules）+ 前提校验（preconditions）。
 //
 // 规则来源 assets/json/age_rules.json，与网页版共用同一份文件（内容一字不改）。
-//   · ageRules   只收窄事件年龄区间，绝不放大；规则互相冲突时放弃纠偏
+//   · ageRules      只收窄事件年龄区间，绝不放大；规则互相冲突时放弃纠偏
 //   · preconditions 校验剧情前提（没配偶不该离婚、没宠物不该宠物离世……）
+//
+// 这里只放「规则的数据与判定函数」，实际筛选流程在 services/event_engine.dart。
 
 /// 一条年龄纠偏规则
 class AgeRule {
@@ -100,7 +102,7 @@ class PreconditionRule {
   bool get isValid => id.isNotEmpty && keyword.isNotEmpty && need.isNotEmpty;
 }
 
-/// 规则集合：负责年龄纠偏与前提校验的判定入口
+/// 规则集合：年龄纠偏与前提校验的判定入口
 class AgeRuleSet {
   /// 年龄纠偏规则
   final List<AgeRule> ageRules;
@@ -108,13 +110,9 @@ class AgeRuleSet {
   /// 前提校验规则
   final List<PreconditionRule> preconditions;
 
-  /// 加载过程中的错误（界面可提示，不影响运行）
-  final List<String> errors;
-
   const AgeRuleSet({
     this.ageRules = const <AgeRule>[],
     this.preconditions = const <PreconditionRule>[],
-    this.errors = const <String>[],
   });
 
   /// 空规则集（资源缺失时的兜底：不纠偏、不校验，保证还能正常玩）
@@ -155,44 +153,21 @@ class AgeRuleSet {
             preconditions.map((PreconditionRule e) => e.toJson()).toList(),
       };
 
-  /// 事件全文（标题 + 剧情 + 全部选项文本 + 选项结果描述），
-  /// 与网页版 TL.eventText 保持一致，用于关键词匹配。
-  static String eventText({
-    required String title,
-    required String story,
-    required List<String> optionTexts,
-    required List<String> descriptions,
-  }) {
-    final StringBuffer buffer = StringBuffer();
-    buffer.write(title);
-    buffer.write(' ');
-    buffer.write(story);
-    for (int i = 0; i < optionTexts.length; i++) {
-      buffer.write(' ');
-      buffer.write(optionTexts[i]);
-    }
-    for (int i = 0; i < descriptions.length; i++) {
-      buffer.write(' ');
-      buffer.write(descriptions[i]);
-    }
-    return buffer.toString();
-  }
-
-  /// 年龄纠偏：按规则收窄 [declaredMin, declaredMax]，只收窄不放大。
+  /// 年龄纠偏：把 [declaredMin, declaredMax] 按命中规则收窄，只收窄不放大。
   ///
-  /// - 任何命中规则的 min 抬高下界，max 压低上界；
-  /// - 规则互相冲突（min > max）时放弃纠偏，返回原区间，避免事件永远不出现；
-  /// - 上界 100 视为「终身」，放宽到 110，否则 101 岁以上抽不到任何事件。
-  static List<int> effectiveAgeRange({
+  /// - 命中规则的 min 抬高下界、max 压低上界；
+  /// - 规则互相冲突（算出的 lo > hi）时放弃纠偏、返回原区间，避免事件永远不出现；
+  /// - 上界 100 在数据里表示「终身」，放宽到 110，否则 101 岁以上抽不到任何事件。
+  List<int> effectiveAgeRange({
     required int declaredMin,
     required int declaredMax,
     required String text,
   }) {
     int lo = declaredMin;
     int hi = declaredMax;
-    for (final AgeRule rule in _activeAgeRules) {
+    for (final AgeRule rule in ageRules) {
       if (rule.min == null && rule.max == null) continue;
-      if (!_matches(rule.keyword, text)) continue;
+      if (!matchesPattern(rule.keyword, text)) continue;
       final int? rmin = rule.min;
       final int? rmax = rule.max;
       if (rmin != null && rmin > lo) lo = rmin;
@@ -203,22 +178,55 @@ class AgeRuleSet {
     return <int>[lo, hi];
   }
 
-  /// 当前生效的年龄规则（由 EventEngine 注入的全局表）
-  static List<AgeRule> _activeAgeRules = const <AgeRule>[];
-
-  /// 注入规则表（EventEngine 初始化时调用一次）
-  static void install(AgeRuleSet rules) {
-    _activeAgeRules = rules.ageRules;
-  }
-
-  /// 关键词匹配（正则失败时退化为普通包含判断，保证不抛异常）
-  static bool _matches(String pattern, String text) {
-    if (pattern.isEmpty || text.isEmpty) return false;
-    try {
-      return RegExp(pattern).hasMatch(text);
-    } catch (_) {
-      return text.contains(pattern);
+  /// 前提校验：返回空串表示允许；否则返回不允许的原因（便于日志与调试）
+  String preconditionReason(
+    String text, {
+    required bool hasPartner,
+    required bool hasChild,
+    required bool hasAlivePet,
+    required bool isConvict,
+    required bool hasJob,
+  }) {
+    for (final PreconditionRule rule in preconditions) {
+      if (!matchesPattern(rule.keyword, text)) continue;
+      if (rule.exclude.isNotEmpty && matchesPattern(rule.exclude, text)) {
+        continue;
+      }
+      bool ok = true;
+      switch (rule.need) {
+        case 'partner':
+          ok = hasPartner;
+          break;
+        case 'child':
+          ok = hasChild;
+          break;
+        case 'pet':
+          ok = hasAlivePet;
+          break;
+        case 'convict':
+          ok = isConvict;
+          break;
+        case 'job':
+          ok = hasJob;
+          break;
+        default:
+          // 未知的前提名不拦截，保持开放
+          ok = true;
+          break;
+      }
+      if (!ok) return rule.reason.isNotEmpty ? rule.reason : rule.id;
     }
+    return '';
+  }
+}
+
+/// 正则可选匹配：正则非法时退化为普通包含判断，保证不抛异常
+bool matchesPattern(String pattern, String text) {
+  if (pattern.isEmpty || text.isEmpty) return false;
+  try {
+    return RegExp(pattern).hasMatch(text);
+  } catch (_) {
+    return text.contains(pattern);
   }
 }
 
@@ -227,6 +235,5 @@ int? _toIntOrNull(Object? value) {
   if (value == null) return null;
   if (value is int) return value;
   if (value is num) return value.toInt();
-  final int? parsed = int.tryParse(value.toString());
-  return parsed;
+  return int.tryParse(value.toString());
 }

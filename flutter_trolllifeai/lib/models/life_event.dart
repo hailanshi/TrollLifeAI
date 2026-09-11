@@ -80,6 +80,20 @@ class LifeEvent {
   /// 是否为 AI 原创剧情（界面会展示「AI 原创」标记）
   final bool ai;
 
+  /// 规则表纠偏后的有效年龄区间 [min, max]。
+  /// 由 EventEngine 依据 assets/json/age_rules.json 计算并缓存；
+  /// 未被纠偏时等于 [minAge, maxAge]（原始声明区间）。
+  int effectiveMinAge = 0;
+
+  /// 纠偏后的最大年龄
+  int effectiveMaxAge = 110;
+
+  /// 是否已经算过纠偏区间
+  bool ageRuleApplied = false;
+
+  /// 记录本次抽事件时该事件是否被前提校验拦下（仅用于调试展示）
+  String blockedReason = '';
+
   const LifeEvent({
     required this.title,
     required this.story,
@@ -152,8 +166,28 @@ class LifeEvent {
         'ai': ai,
       };
 
-  /// 年龄是否落在区间内
-  bool matchAge(int age) => age >= minAge && age <= maxAge;
+  /// 年龄是否落在「纠偏后」的有效区间内。
+  ///
+  /// 纠偏区间由 EventEngine 通过 applyAgeRange 写入；未纠偏时退化为原始区间，
+  /// 因此本方法在没有规则数据时行为与旧版本一致。
+  bool matchAge(int age) {
+    if (!ageRuleApplied) return age >= minAge && age <= maxAge;
+    return age >= effectiveMinAge && age <= effectiveMaxAge;
+  }
+
+  /// 原始声明区间是否命中（三级兜底的最末一级使用）
+  bool matchDeclaredAge(int age) => age >= minAge && age <= maxAge;
+
+  /// 写入纠偏后的年龄区间（由 EventEngine 调用）
+  void applyAgeRange(int min, int max) {
+    effectiveMinAge = min;
+    effectiveMaxAge = max;
+    ageRuleApplied = true;
+  }
+
+  /// 有效区间是否被收窄过（用于调试 / 展示）
+  bool get ageRangeNarrowed =>
+      ageRuleApplied && (effectiveMinAge != minAge || effectiveMaxAge != maxAge);
 
   /// 是否限定某个年代（eraLimit 为空则任何年代都可以）
   bool matchEra(String era) {
