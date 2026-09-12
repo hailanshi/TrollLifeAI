@@ -44,14 +44,16 @@ const data = {
   event: JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/json/event.json'), 'utf8')),
 };
 global.__TL_DATA__ = data;
-/* 规则表在 app.html 里是内联的（window.__TL_RULES__），测试里手动喂进去 */
+/* 规则表与职业数据在 app.html 里是内联的（window.__TL_RULES__ / __TL_CAREER__），测试里手动喂进去 */
 global.__TL_RULES__ = JSON.parse(fs.readFileSync(path.join(ROOT, 'src/age-rules.json'), 'utf8'));
+global.__TL_CAREER__ = JSON.parse(fs.readFileSync(path.join(ROOT, 'src/career.json'), 'utf8'));
 
 const core = fs.readFileSync(path.join(ROOT, 'src/js/01_core.js'), 'utf8');
 const ach = fs.readFileSync(path.join(ROOT, 'src/js/02_ach.js'), 'utf8');
 const aiSrc = fs.readFileSync(path.join(ROOT, 'src/js/03_ai.js'), 'utf8');
 const actSrc = fs.readFileSync(path.join(ROOT, 'src/js/04_actions.js'), 'utf8');
 const uiSrc = fs.readFileSync(path.join(ROOT, 'src/js/05_ui.js'), 'utf8');
+const careerSrc = fs.readFileSync(path.join(ROOT, 'src/js/02_career.js'), 'utf8');
 
 /* 让 toast 静默，避免刷屏 */
 let toastCount = 0;
@@ -60,6 +62,7 @@ function run(code, label) {
   try { (0, eval)(code); } catch (e) { errors.push(label + ': ' + e.message); }
 }
 run(core, 'core');
+run(careerSrc, 'career');
 global.toast = function () { toastCount++; };
 global.window.toast = global.toast;
 run(ach, 'ach');
@@ -481,7 +484,9 @@ assert(TL.preconditionReason(divorceEv, TL.S) !== '', '没有伴侣时离婚事�
 assert(TL.preconditionReason(petEv, TL.S) !== '', '没有宠物时宠物事件未被拦截');
 assert(TL.preconditionReason(jobEv, TL.S) !== '', '没有工作时职场事件未被拦截');
 TL.addRelation('spouse', '小雨');
-assert(TL.preconditionReason(divorceEv, TL.S) === '', '有伴侣后离婚事件仍被拦截');
+assert(TL.preconditionReason(divorceEv, TL.S) !== '', '离婚剧情里提到孩子，没有子女时不该放行');
+TL.addRelation('child', '小宝');
+assert(TL.preconditionReason(divorceEv, TL.S) === '', '有伴侣和子女后离婚事件仍被拦截');
 TL.addPet('猫');
 assert(TL.preconditionReason(petEv, TL.S) === '', '有宠物后宠物事件仍被拦截');
 TL.S.job = '程序员'; TL.S.salary = 20000;
@@ -576,6 +581,87 @@ assert(fastBody.indexOf('属性净变化') !== -1, '快进总结缺少属性净�
 assert(fastBody.indexOf('件事') !== -1, '快进总结缺少事件条数');
 ui.closeModal();
 section('快进 10 年（真实推进 ' + advanced + ' 年 + 自动抉择 + 十年总结）');
+
+/* 7.11 职业深度线（行业阶梯 + 行业景气） */
+TL.resetAll();
+TL.S = TL.newState('10', '一线城市', [data.talents[0]], '陈默', '男');
+TL.S.age = 24;
+TL.S.attrs['智力'] = 70;
+TL.takeJob('大厂程序员', TL.S);
+assert(TL.S.jobIndustry === 'it', '岗位没有映射到行业：' + TL.S.jobIndustry);
+assert(TL.S.jobLevel === 2, '岗位等级映射错误：' + TL.S.jobLevel);
+assert(TL.S.job === '大厂程序员', '岗位名不对：' + TL.S.job);
+assert(TL.S.salary > 10000, 'IT 行业薪资过低：' + TL.S.salary);
+assert(TL.S.industryMood === TL.eraMood('it', '10'), '行业景气没有按年代初始化');
+/* 高绩效 + 足司龄 → 若干年内必然晋升 */
+TL.S.performance = 95;
+const startLevel = TL.S.jobLevel;
+let promoted = false, salaryHistory = [TL.S.salary];
+for (let y = 0; y < 8; y++) {
+  TL.S.age += 1;
+  TL.S.jobTenure = TL.S.jobTenure || 0;
+  TL.careerYearly();
+  salaryHistory.push(TL.S.salary);
+  if (TL.S.jobLevel > startLevel) { promoted = true; break; }
+}
+assert(promoted, '高绩效 8 年都没有晋升（职业阶梯失效）');
+assert(TL.S.jobLevel > startLevel && TL.S.job === TL.jobTitle('it', TL.S.jobLevel), '晋升后岗位名没跟着变');
+assert(TL.S.salary > salaryHistory[0], '晋升后薪资没有上涨');
+/* 行业寒冬必须能触发裁员 */
+let fired = false;
+for (let i = 0; i < 40 && !fired; i++) {
+  TL.S.job = '技术专家'; TL.S.jobLevel = 3; TL.S.performance = 5;
+  TL.S.industryMood = 6;
+  TL.S.jobTenure = 3;
+  TL.careerYearly();
+  if (!TL.S.job) { fired = true; }
+}
+assert(fired, '行业景气极低 + 绩效极差 40 年都没被裁（裁员逻辑失效）');
+assert(TL.S.industryMood >= 5 && TL.S.industryMood <= 100, '行业景气越界：' + TL.S.industryMood);
+/* 跳槽 */
+TL.takeJob('程序员', TL.S);
+const beforeHop = TL.S.salary;
+TL.jobHop(TL.S);
+assert(TL.S.salary !== beforeHop, '跳槽没有改变薪资');
+section('职业深度线（行业映射 / 景气初始化 / 晋升 / 裁员 / 跳槽）');
+
+/* 7.12 家庭代际线（子女随玩家变老 + 阶段校验） */
+TL.resetAll();
+TL.S = TL.newState('00', '二线城市', [data.talents[0]], '苏晚', '女');
+TL.S.age = 30;
+TL.addRelation('child', '小宝');
+const kid = TL.S.relations.filter((r) => r.type === 'child')[0];
+assert(kid && kid.age === 0 && kid.stage === 'baby', '子女初始状态不对');
+assert(kid.talent, '子女没有生成性格/天赋');
+/* 一路长大，阶段必须依次推进 */
+const seenStages = ['baby'];
+for (let y = 0; y < 31; y++) {
+  TL.S.age += 1;
+  TL.childrenYearly();
+  if (seenStages[seenStages.length - 1] !== kid.stage) { seenStages.push(kid.stage); }
+}
+assert(seenStages.join('>') === 'baby>toddler>primary>teen>college>adult>family',
+  '子女阶段推进顺序不对：' + seenStages.join('>'));
+assert(kid.age === 31, '子女年龄没有跟上：' + kid.age);
+/* 子女剧情的阶段校验 */
+const childEvents = data.event.filter((e) => (e.title + e.story).indexOf('{孩子}') !== -1);
+assert(childEvents.length >= 30, '子女剧情数量不足：' + childEvents.length);
+const primaryEv = childEvents.filter((e) => /小学|红领巾|家长会/.test(e.title))[0];
+const collageEv = childEvents.filter((e) => /大学|志愿|宿舍|考研/.test(e.title))[0];
+assert(primaryEv && collageEv, '找不到小学/大学阶段的子女剧情');
+TL.S.age = 36;
+TL.S.relations = TL.S.relations.filter((r) => r.type !== 'child');
+TL.addRelation('child', '小宝');
+assert(TL.childStageReason(primaryEv, TL.S) !== '', '子女还是婴儿却能触发小学剧情');
+for (let y = 0; y < 7; y++) { TL.childrenYearly(); }
+const kid2 = TL.S.relations.filter((r) => r.type === 'child')[0];
+assert(kid2 && kid2.stage === 'primary', '7 年后子女应进入小学阶段，实际 ' + (kid2 && kid2.stage));
+assert(TL.childStageReason(primaryEv, TL.S) === '', '子女在小学阶段却触发不了小学剧情');
+assert(TL.childStageReason(collageEv, TL.S) !== '', '子女在小学阶段却能触发大学剧情');
+/* {孩子} 占位符必须替换成子女名 */
+assert(TL.fill('{孩子} 今天上学了，{名字} 送 {ta} 到门口', TL.S).indexOf('小宝 今天上学了') === 0,
+  '{孩子} 占位符没有替换成子女名：' + TL.fill('{孩子} 今天上学了', TL.S));
+section('家庭代际线（阶段推进 + ' + childEvents.length + ' 条子女剧情按阶段触发 + {孩子} 占位符）');
 
 console.log('======== 无头逻辑自检报告 ========');
 console.log('模拟人生局数        : ' + lives + '（死亡 ' + deaths + ' 局，含服刑 ' + prisonLives + ' 局）');

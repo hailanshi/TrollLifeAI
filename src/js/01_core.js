@@ -51,11 +51,26 @@
     if (text.indexOf('{') === -1) { return text; }
     var female = (st.gender === '女');
     var name = st.name || (female ? '她' : '他');
+    var child = TL.youngestChildName(st);
     return text
       .replace(/\{名字\}/g, name)
+      .replace(/\{孩子\}/g, child)
       .replace(/\{ta的\}/g, female ? '她的' : '他的')
       .replace(/\{ta\}/g, female ? '她' : '他')
       .replace(/\{配偶\}/g, female ? '丈夫' : '妻子');
+  };
+
+  /* 取一个子女的名字用于 {孩子} 占位符（没有子女时用「孩子」兜底） */
+  TL.youngestChildName = function (st) {
+    if (!st || !st.relations) { return '孩子'; }
+    var best = null;
+    for (var i = 0; i < st.relations.length; i++) {
+      var r = st.relations[i];
+      if (r.type === 'child' && r.alive !== false) {
+        if (!best || (r.age || 0) < (best.age || 0)) { best = r; }
+      }
+    }
+    return best ? best.name : '孩子';
   };
 
   /* 性别筛选：女性专属剧情不会出现在男性玩家身上，反之亦然 */
@@ -111,6 +126,8 @@
       alive: true, deathReason: '', lifespan: 0, moves: 0,
       actionPoints: 1,                                   /* 每岁 1 点主动行动力 */
       ai: { used: 0, fails: 0, cache: [] },               /* AI 剧情使用统计 */
+      /* 职业深度线 */
+      jobIndustry: '', jobLevel: 0, performance: 50, jobTenure: 0, industryMood: 0,
       stat: { maxMoney: 0, earnings: 0, income: 0, hospital: 0, crimeCaught: 0, prisonTotal: 0 }
     };
     var i;
@@ -318,10 +335,17 @@
         else if (t === '宠物离世') { TL.petEvent('离世'); }
         else if (t === '关系') { TL.addRelation(a[0], a[1]); }
         else if (t === '关系结束') { TL.endRelation(a[0]); }
-        else if (t === '职业') { s.job = a[0]; s.salary = TL.baseSalary(a[0], s); s.flags.jobFirst = 1; TL.unlock('打工人'); }
-        else if (t === '升职') { s.salary = Math.round(s.salary * 1.4) || 8000; s.flags.promoted = 1; TL.unlock('职场晋升'); }
+        else if (t === '职业') { TL.takeJob(a[0], s); s.flags.jobFirst = 1; TL.unlock('打工人'); }
+        else if (t === '升职') {
+          var ind0 = TL.industryById(s.jobIndustry);
+          var maxLv = ind0 ? ind0.ladder.length - 1 : 0;
+          if (s.jobLevel < maxLv) { s.jobLevel += 1; s.job = TL.jobTitle(s.jobIndustry, s.jobLevel); }
+          s.salary = TL.calcSalary(s);
+          s.flags.promoted = 1;
+          TL.unlock('职场晋升');
+        }
         else if (t === '失业') { s.job = ''; s.salary = 0; s.flags.fired = 1; TL.unlock('被优化了'); }
-        else if (t === '跳槽') { s.salary = Math.round(s.salary * 1.3) || 9000; s.flags.jobHop = 1; TL.unlock('跳槽高手'); }
+        else if (t === '跳槽') { TL.jobHop(s); s.flags.jobHop = 1; TL.unlock('跳槽高手'); }
         else if (t === '创业') { s.flags.startup = 1; }
         else if (t === '破产') { s.flags.bankrupt = 1; s.job = ''; s.salary = 0; TL.unlock('公司破产'); }
         else if (t === '入狱') { TL.jail(parseInt(a[0], 10) || 1); }
@@ -396,8 +420,20 @@
       }
     }
     var base = (type === 'enemy') ? 20 : 60;
-    s.relations.push({ name: name, type: type, affinity: base, alive: true, since: s.age });
+    var rel = { name: name, type: type, affinity: base, alive: true, since: s.age };
+    /* 子女：跟着玩家一起长大，出生时随机一个性格/天赋 */
+    if (type === 'child') {
+      rel.age = 0;
+      rel.stage = 'baby';
+      rel.talent = TL.pick(TL.CHILD_TALENTS);
+    }
+    s.relations.push(rel);
     if (type === 'lover' && s.age <= 18) { TL.unlock('青梅竹马'); }
+    if (type === 'child') {
+      window.toast('子女降生：' + name + '（' + rel.talent + '）');
+      TL.addLog('第 ' + s.age + ' 年：' + name + ' 出生了（' + rel.talent + '）');
+      return;
+    }
     window.toast('新增关系：' + TL.REL_TYPES[type] + ' ' + name);
   };
   TL.endRelation = function (name) {
@@ -541,6 +577,11 @@
     TL.applyAttr(TL.naturalDrift(), true);
     var inc = TL.yearlyIncome();
     s.flags.halfIncome = 0;             /* 收入减半只在当年生效 */
+
+    /* 2.5 职业线推进（景气波动 / 绩效 / 晋升 / 裁员）与代际线推进（子女长大） */
+    var careerNotes = [];
+    try { careerNotes = TL.careerYearly() || []; } catch (e) { }
+    try { TL.childrenYearly(); } catch (e2) { }
     if (inc) { TL.applyAttr({ '财富': inc, '智力': 0, '体质': 0, '魅力': 0, '快乐': 0, '运气': 0, '健康值': 0, '成瘾值': 0, '名声值': 0, '压力值': 0, '罪恶值': 0 }, true); }
 
     /* 3. 医疗系统：健康告急且有钱时自动就医调养（花钱续命，医疗技能更省） */
@@ -721,6 +762,7 @@
       if (!eraOk) { continue; }
       if (TL.preconditionReason(ev, s)) { continue; }
       if (TL.genderReason(ev, s)) { continue; }
+      if (TL.childStageReason(ev, s)) { continue; }
       pool.push(ev);
       if (!TL.has(s.usedTitles, ev.title)) { fresh.push(ev); }
     }

@@ -374,6 +374,49 @@
       '<div class="tiny">快进会替你做抉择（自动挑综合最划算的选项），结束后给出这十年的总结。</div>' +
       '</div>';
 
+    /* 职业发展（行业阶梯 + 行业景气） */
+    var ind = TL.industryById(S.jobIndustry);
+    if (ind || S.job) {
+      var mood = S.industryMood || 0;
+      var perf = (S.performance === undefined) ? 50 : S.performance;
+      var maxLv = ind ? ind.ladder.length - 1 : 0;
+      var needPerf = (TL.CAREER.levelPerfNeed || [])[S.jobLevel] || 0;
+      var needYears = (TL.CAREER.levelMinYears || [])[S.jobLevel] || 0;
+      h += '<div class="card"><h3>职业发展<span class="tail">' + (ind ? esc(ind.name) : '—') + '</span></h3>';
+      if (S.job) {
+        h += '<div class="row"><div><div class="big" style="font-size:18px">' + esc(S.job) + '</div>' +
+          '<div class="tiny">' + esc(TL.levelName(S.jobLevel)) + '级 · 第 ' + (S.jobLevel + 1) + '/' + (maxLv + 1) +
+          ' 阶 · 司龄 ' + (S.jobTenure || 0) + ' 年</div></div>' +
+          '<div class="tiny center">月薪<br><b style="font-size:14px;color:#7fd1ae">' + TL.fmt(S.salary) + '</b></div></div>';
+      } else {
+        h += '<div class="tiny down">目前处于失业状态' + (ind ? ('（行业：' + esc(ind.name) + '，景气 ' + mood + '）') : '') + '</div>';
+      }
+      if (ind) {
+        h += '<div class="ladderBox">';
+        for (var lv = 0; lv < ind.ladder.length; lv++) {
+          var on = (S.job && lv <= S.jobLevel) ? ' on' : '';
+          h += '<span class="ladderStep' + on + '">' + esc(ind.ladder[lv]) + '</span>';
+        }
+        h += '</div>';
+      }
+      h += '<div class="attrRow"><div style="flex:1"><div class="attrName">绩效</div>' +
+        '<div class="bar"><i style="width:' + TL.clamp(perf, 0, 100) + '%;background:' +
+        (perf >= 70 ? '#4a9d7f' : (perf >= 45 ? '#e0b060' : '#e8796b')) + '"></i></div></div>' +
+        '<div class="attrVal">' + perf + '</div></div>';
+      h += '<div class="attrRow"><div style="flex:1"><div class="attrName">行业景气 · ' + TL.industryMoodLabel(mood) + '</div>' +
+        '<div class="bar"><i style="width:' + TL.clamp(mood, 0, 100) + '%;background:' +
+        (mood >= 62 ? '#4a9d7f' : (mood >= 38 ? '#e0b060' : '#e8796b')) + '"></i></div></div>' +
+        '<div class="attrVal">' + mood + '</div></div>';
+      if (S.job && ind && S.jobLevel < maxLv) {
+        h += '<div class="tiny">下一阶「' + esc(ind.ladder[S.jobLevel + 1]) + '」需要 绩效 ≥ ' + needPerf +
+          '、司龄 ≥ ' + needYears + ' 年；可用「争取晋升」行动提高概率。</div>';
+      } else if (S.job) {
+        h += '<div class="tiny">已经是这个行业的最高职位。</div>';
+      }
+      if (mood > 0 && mood < 38) { h += '<div class="tiny down">行业正处于寒冬，注意裁员风险。</div>'; }
+      h += '</div>';
+    }
+
     /* 主动行动（每岁 1 点行动力） */
     h += '<div class="card"><h3>主动行动<span class="tail">行动点 ' + S.actionPoints + ' / 1</span></h3>' +
       '<div class="tiny">每年 1 点行动力，可以主动做一件事；也可以什么都不做直接过一年。</div>';
@@ -430,9 +473,13 @@
     if (!S.relations.length) { h += '<div class="tiny">暂无关系，多参与社交事件吧</div>'; }
     for (var r = 0; r < S.relations.length; r++) {
       var rel = S.relations[r];
+      var relSub = (TL.REL_TYPES[rel.type] || rel.type) + ' · ' + (rel.since !== undefined ? (rel.since + ' 岁结识') : '');
+      if (rel.type === 'child' && rel.stage) {
+        relSub = '子女 · ' + (rel.age || 0) + ' 岁 · ' + TL.stageName(rel.stage) + (rel.talent ? (' · ' + rel.talent) : '');
+      }
       h += '<div class="listItem"><div class="li-main"><div class="li-name">' +
         (rel.alive === false ? '<span class="tiny">[已结束] </span>' : '') + esc(rel.name) + '</div>' +
-        '<div class="li-sub">' + (TL.REL_TYPES[rel.type] || rel.type) + ' · ' + (rel.since !== undefined ? (rel.since + ' 岁结识') : '') +
+        '<div class="li-sub">' + esc(relSub) +
         (rel.lastAct !== undefined && rel.lastAct === S.age ? ' · 今年已互动' : '') + '</div></div>' +
         '<div class="li-right">好感 ' + rel.affinity + '</div></div>';
       if (rel.alive !== false && S.alive) {

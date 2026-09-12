@@ -73,9 +73,21 @@ function effectiveRange(ev) {
 }
 
 let violations = [];
+let childViolations = [];
 events.forEach((ev) => {
   const [lo, hi] = effectiveRange(ev);
-  /* 遍历有效区间里的每一年，检查标题是否命中该年龄的禁忌 */
+  const allText = (ev.title || '') + ' ' + (ev.story || '') + ' ' +
+    (ev.choices || []).map((c) => (c.option_text || '') + (c.desc || '')).join(' ');
+  const isChildEvent = allText.indexOf('{孩子}') !== -1;
+
+  /* 子女剧情：标题里的「小学 / 中考 / 大学」说的是孩子不是玩家本人，
+     所以不用玩家年龄禁忌去卡它，改为校验「家长年龄是否合理」 */
+  if (isChildEvent) {
+    if (lo < 22 || hi > 80) { childViolations.push({ title: ev.title, range: lo + '-' + hi }); }
+    return;
+  }
+
+  /* 玩家自己的剧情：遍历有效区间，检查标题是否命中该年龄的禁忌 */
   for (const [re, band, why] of TABOO) {
     if (!re.test(ev.title || '')) { continue; }
     const overlapLo = Math.max(lo, band[0]);
@@ -111,7 +123,9 @@ console.log('各年龄段可用事件数：');
 console.log('\n空池年龄（抽不到任何事件）: ' + (uncovered.length ? uncovered.join(', ') : '无 ✓'));
 console.log('年龄与剧情不匹配的事件: ' + violations.length + (violations.length ? '' : ' ✓'));
 violations.slice(0, 20).forEach((v) => console.log('  ✗ [' + v.range + '] ' + v.title + ' —— ' + v.why));
+console.log('子女剧情家长年龄不合理: ' + childViolations.length + (childViolations.length ? '' : ' ✓'));
+childViolations.slice(0, 10).forEach((v) => console.log('  ✗ [' + v.range + '] ' + v.title));
 
-const ok = violations.length === 0 && uncovered.length === 0;
+const ok = violations.length === 0 && uncovered.length === 0 && childViolations.length === 0;
 console.log('\n结论: ' + (ok ? '通过' : '存在问题'));
 process.exit(ok ? 0 : 1);

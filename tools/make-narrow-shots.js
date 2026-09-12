@@ -53,9 +53,11 @@ const SCENES = {
     TL.resetAll();
     window.ui.tab = 'start'; window.ui.setEra('10'); window.ui.setCity('新一线城市');
     window.ui.drawTalents(); window.ui.pickTalent(0); window.ui.beginLife();
-    TL.S.age = 28; TL.S.job = '大厂程序员'; TL.S.salary = 26000;
+    TL.S.age = 34; TL.takeJob('大厂程序员', TL.S); TL.S.jobLevel = 3; TL.S.job = TL.jobTitle('it', 3); TL.S.performance = 78; TL.S.jobTenure = 6; TL.S.industryMood = 52; TL.S.salary = TL.calcSalary(TL.S);
     TL.S.attrs['财富'] = 180000; TL.S.actionPoints = 1;
     TL.addRelation('spouse', '小雨'); TL.addRelation('child', '小宝');
+    var kid = TL.S.relations.filter(function (r) { return r.type === 'child'; })[0];
+    for (var ky = 0; ky < 18; ky++) { TL.childrenYearly(); }
     TL.addRelation('friend', '老周'); TL.addRelation('enemy', '老王');
     TL.addPet('猫');
     for (var i = 0; i < 5; i++) { TL.addLog('第 ' + (22 + i) + ' 年：示例人生记录'); }
@@ -80,6 +82,8 @@ const SCENES = {
     TL.S.age = 32;
     TL.addRelation('friend', '老周'); TL.addRelation('lover', '阿哲');
     TL.addRelation('spouse', '小雨'); TL.addRelation('child', '小宝');
+    var kid = TL.S.relations.filter(function (r) { return r.type === 'child'; })[0];
+    for (var ky = 0; ky < 18; ky++) { TL.childrenYearly(); }
     TL.addRelation('enemy', '老王'); TL.addRelation('friend', '小林');
     TL.addPet('猫'); TL.addPet('狗');
     TL.addAddiction('烟瘾', 45); TL.addAddiction('网瘾', 30);
@@ -87,7 +91,7 @@ const SCENES = {
     TL.S.assets.debt = 45000; TL.S.assets.house = 1;
     for (var i = 0; i < 6; i++) { TL.addLog('第 ' + (i + 20) + ' 年：示例人生记录 ' + i); }
     window.ui.go('home');
-    d.getElementById('screen').scrollTop = 1750;`,
+    d.getElementById('screen').scrollTop = 2200;`,
   narrow_event: `
     TL.resetAll();
     window.ui.tab = 'start'; window.ui.setEra('00'); window.ui.setCity('新一线城市');

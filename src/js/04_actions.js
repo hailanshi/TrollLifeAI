@@ -151,8 +151,8 @@
       run: function () {
         return {
           change: { '压力值': -10, '快乐': 4, '健康值': 2 },
-          flags: { halfIncome: 1 },
-          log: '给自己放了个长假，压力缓解（当年收入减半）',
+          flags: { halfIncome: 1, restedYear: TL.S ? TL.S.age : 0 },
+          log: '给自己放了个长假，压力缓解（当年收入减半、绩效下滑）',
           toast: '压力 -10，今年收入减半'
         };
       }
@@ -232,6 +232,52 @@
           markers: '【关系:child:' + TL.genName() + '】',
           log: female ? '经历怀孕与生产，家里迎来一个新生命' : '配偶顺利生产，你当上了爸爸',
           toast: female ? '怀孕生子：子女 +1，健康 -5' : '孩子出生：子女 +1'
+        };
+      }
+    },
+    {
+      id: 'promote', name: '争取晋升', tag: '职业',
+      desc: '主动扛项目、找领导对齐目标，绩效与人脉一起押上',
+      need: function (s) {
+        if (!s.job) { return '目前没有工作'; }
+        var ind = TL.industryById(s.jobIndustry);
+        var maxLv = ind ? ind.ladder.length - 1 : 0;
+        if (s.jobLevel >= maxLv) { return '已经是这个行业的最高职位'; }
+        return '';
+      },
+      run: function (s) {
+        s.flags.pushedPromotion = s.age;
+        return {
+          change: { '压力值': 6, '健康值': -2, '智力': 1 },
+          perf: 12,
+          log: '主动争取晋升，把绩效压上去了（' + s.job + '）',
+          toast: '绩效 +12，今年晋升概率提高'
+        };
+      }
+    },
+    {
+      id: 'jump', name: '跳槽面试', tag: '职业',
+      desc: '看行情谈新机会：景气好能涨薪，景气差白跑一趟',
+      need: function (s) { return s.job ? '' : '目前没有工作，先在剧情里找份工作'; },
+      run: function (s) {
+        var mood = s.industryMood || 60;
+        var rate = 0.4 + (mood - 40) / 120 + s.skills.length * 0.02 + (s.attrs['魅力'] - 50) / 200;
+        if (TL.has(s.skills, 'negotiation_life')) { rate += 0.06; }
+        rate = TL.clamp(rate, 0.15, 0.85);
+        if (Math.random() < rate) {
+          var before = s.salary;
+          var after = TL.jobHop(s);
+          if (after <= before) { after = Math.round(before * 1.12); s.salary = after; }
+          return {
+            change: { '快乐': 3, '压力值': -2, '名声值': 1 },
+            log: '跳槽成功，月薪从 ' + TL.fmt(before) + ' 涨到 ' + TL.fmt(after),
+            toast: '跳槽成功：月薪 → ' + TL.fmt(after)
+          };
+        }
+        return {
+          change: { '快乐': -3, '压力值': 8, '健康值': -1 },
+          log: '跳槽面试失败，行情和运气都不在你这边',
+          toast: '跳槽失败（行业景气 ' + mood + '）'
         };
       }
     },
@@ -337,6 +383,10 @@
       for (var f in res.flags) {
         if (Object.prototype.hasOwnProperty.call(res.flags, f)) { s.flags[f] = res.flags[f]; }
       }
+    }
+    /* 行动也能直接改绩效（职业线） */
+    if (res.perf) {
+      s.performance = TL.clamp(((s.performance === undefined) ? 50 : s.performance) + res.perf, 0, 100);
     }
     if (res.reduceAddiction && res.reduceAddiction.type) {
       var t = res.reduceAddiction.type;

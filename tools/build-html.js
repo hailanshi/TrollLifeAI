@@ -29,8 +29,10 @@ const data = {
 };
 /* 剧情逻辑规则表（年龄纠偏 + 前提校验），网页版与 Flutter 版共用 */
 const rules = readJson(path.join(ROOT, 'src', 'age-rules.json'));
+/* 职业深度线数据（行业阶梯 + 景气基线） */
+const career = readJson(path.join(ROOT, 'src', 'career.json'));
 
-const jsFiles = ['01_core.js', '02_ach.js', '03_ai.js', '04_actions.js', '05_ui.js'];
+const jsFiles = ['01_core.js', '02_career.js', '02_ach.js', '03_ai.js', '04_actions.js', '05_ui.js'];
 const jsParts = jsFiles.map((f) => '/* ===== ' + f + ' ===== */\n' + read(path.join(ROOT, 'src', 'js', f)));
 
 const banner =
@@ -57,8 +59,10 @@ const out =
   body +
   '\n<script>\n/* ===== 游戏数据（由 5 份 JSON 合并后内联） ===== */\nwindow.__TL_DATA__ = ' +
   safeJson(data) +
-  ';\n/* ===== 剧情逻辑规则表（年龄纠偏 + 前提校验） ===== */\nwindow.__TL_RULES__ = ' +
+  ';\n/* ===== 剧情逻辑规则表（年龄纠偏 + 前提校验 + 性别 + 子女阶段） ===== */\nwindow.__TL_RULES__ = ' +
   safeJson(rules) +
+  ';\n/* ===== 职业深度线数据（行业阶梯 + 景气基线） ===== */\nwindow.__TL_CAREER__ = ' +
+  safeJson(career) +
   ';\n</script>\n' +
   '<script>\n' + jsParts.join('\n') + '\n</script>\n' +
   '</body>\n</html>\n';
